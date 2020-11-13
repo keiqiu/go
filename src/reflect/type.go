@@ -1822,6 +1822,7 @@ func ChanOf(dir ChanDir, t Type) Type {
 	return ti.(Type)
 }
 
+// see runtime/map.go 1361
 func ismapkey(*rtype) bool // implemented in runtime
 
 // MapOf returns the map type with the given key and element types.
@@ -1830,10 +1831,11 @@ func ismapkey(*rtype) bool // implemented in runtime
 //
 // If the key type is not a valid map key type (that is, if it does
 // not implement Go's == operator), MapOf panics.
-func MapOf(key, elem Type) Type {
+func MapOf(key, elem Type) Type { //初始化mapType
 	ktyp := key.(*rtype)
 	etyp := elem.(*rtype)
 
+	//key类型是否有hash函数
 	if !ismapkey(ktyp) {
 		panic("reflect.MapOf: invalid key type " + ktyp.String())
 	}
@@ -1878,7 +1880,7 @@ func MapOf(key, elem Type) Type {
 	} else {
 		mt.valuesize = uint8(etyp.size)
 	}
-	mt.bucketsize = uint16(mt.bucket.size)
+	mt.bucketsize = uint16(mt.bucket.size) //设置bucketsize
 	if isReflexive(ktyp) {
 		mt.flags |= 4
 	}
@@ -2157,7 +2159,9 @@ const (
 	maxValSize uintptr = 128
 )
 
+//bucket初始化接口
 func bucketOf(ktyp, etyp *rtype) *rtype {
+	//key和elem的长度超过128，将直接存储指针
 	if ktyp.size > maxKeySize {
 		ktyp = PtrTo(ktyp).(*rtype)
 	}

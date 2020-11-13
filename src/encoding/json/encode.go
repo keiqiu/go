@@ -695,6 +695,7 @@ func (me mapEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 			e.error(&MarshalerError{v.Type(), err})
 		}
 	}
+	//对map的key进行了自然排序
 	sort.Slice(sv, func(i, j int) bool { return sv[i].s < sv[j].s })
 
 	for i, kv := range sv {

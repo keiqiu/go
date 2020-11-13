@@ -78,6 +78,7 @@ func makefield(name string, t *types.Type) *types.Field {
 	return f
 }
 
+//bucket创建
 // bmap makes the map bucket type given the type of the map.
 func bmap(t *types.Type) *types.Type {
 	if t.MapType().Bucket != nil {
@@ -140,7 +141,7 @@ func bmap(t *types.Type) *types.Type {
 	// the type of the overflow field to uintptr in this case.
 	// See comment on hmap.overflow in runtime/map.go.
 	otyp := types.NewPtr(bucket)
-	if !types.Haspointers(elemtype) && !types.Haspointers(keytype) {
+	if !types.Haspointers(elemtype) && !types.Haspointers(keytype) { //如果key和element都没有指证，则将overflow的类型设置成uintptr
 		otyp = types.Types[TUINTPTR]
 	}
 	overflow := makefield("overflow", otyp)
@@ -207,6 +208,7 @@ func bmap(t *types.Type) *types.Type {
 	return bucket
 }
 
+//hmap 创建
 // hmap builds a type representing a Hmap structure for the given map type.
 // Make sure this stays in sync with runtime/map.go.
 func hmap(t *types.Type) *types.Type {
