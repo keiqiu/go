@@ -30,16 +30,25 @@ const (
 )
 
 type hchan struct {
-	qcount   uint           // total data in the queue
-	dataqsiz uint           // size of the circular queue
-	buf      unsafe.Pointer // points to an array of dataqsiz elements
+	// 当前队列中元素的个数
+	qcount uint // total data in the queue
+	// 队列大小，即chan的大小，无缓冲的为0
+	dataqsiz uint // size of the circular queue
+	// 队列的头指针
+	buf unsafe.Pointer // points to an array of dataqsiz elements
+	// 当前结构所占的元素大小
 	elemsize uint16
+	// chan关闭标记
 	closed   uint32
 	elemtype *_type // element type
-	sendx    uint   // send index
-	recvx    uint   // receive index
-	recvq    waitq  // list of recv waiters
-	sendq    waitq  // list of send waiters
+	// 下一个发送时数据时所写入到buf的位置
+	sendx uint // send index
+	// 下一个读取时操作时从buf中读取的位置
+	recvx uint // receive index
+	// 当前chan的接收数据的阻塞队列
+	recvq waitq // list of recv waiters
+	// 当前chan的发送数据的阻塞队列
+	sendq waitq // list of send waiters
 
 	// lock protects all fields in hchan, as well as several
 	// fields in sudogs blocked on this channel.
@@ -68,6 +77,7 @@ func makechan64(t *chantype, size int64) *hchan {
 	return makechan(t, int(size))
 }
 
+// 创建chan
 func makechan(t *chantype, size int) *hchan {
 	elem := t.elem
 
@@ -106,6 +116,7 @@ func makechan(t *chantype, size int) *hchan {
 		c.buf = mallocgc(mem, elem, true)
 	}
 
+	// 开辟空间 设置大小等
 	c.elemsize = uint16(elem.size)
 	c.elemtype = elem
 	c.dataqsiz = uint(size)
@@ -124,6 +135,7 @@ func chanbuf(c *hchan, i uint) unsafe.Pointer {
 // entry point for c <- x from compiled code
 //go:nosplit
 func chansend1(c *hchan, elem unsafe.Pointer) {
+	// getcallerpc是返回调用者的程序计数器
 	chansend(c, elem, true, getcallerpc())
 }
 
@@ -139,6 +151,8 @@ func chansend1(c *hchan, elem unsafe.Pointer) {
  * been closed.  it is easiest to loop and re-run
  * the operation; we'll see that it's now closed.
  */
+// block是标识chan是否为阻塞状态，当select有default的情况，chan为非阻塞 func@selectnbsend
+// ep是写入的数据
 func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	if c == nil {
 		if !block {
@@ -170,6 +184,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	// It is okay if the reads are reordered here: if we observe that the channel is not
 	// ready for sending and then observe that it is not closed, that implies that the
 	// channel wasn't closed during the first observation.
+	//如果当前为非阻塞 && chan没有关闭 && （（chan为无缓冲 && 没有人等着获取）|| （chan为有缓冲 && chan缓冲区已满））
 	if !block && c.closed == 0 && ((c.dataqsiz == 0 && c.recvq.first == nil) ||
 		(c.dataqsiz > 0 && c.qcount == c.dataqsiz)) {
 		return false
@@ -182,11 +197,12 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 
 	lock(&c.lock)
 
+	// 不能往关闭的chan写数据
 	if c.closed != 0 {
 		unlock(&c.lock)
 		panic(plainError("send on closed channel"))
 	}
-
+	// 如有其他协程正等着接受（阻塞中），直接将数据发给协程
 	if sg := c.recvq.dequeue(); sg != nil {
 		// Found a waiting receiver. We pass the value we want to send
 		// directly to the receiver, bypassing the channel buffer (if any).
@@ -194,6 +210,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 		return true
 	}
 
+	// 如果buf还没写满， 则写入buf，并修改sendX至下一个位置，qcount++
 	if c.qcount < c.dataqsiz {
 		// Space is available in the channel buffer. Enqueue the element to send.
 		qp := chanbuf(c, c.sendx)
@@ -211,13 +228,17 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 		return true
 	}
 
+	// 如果非阻塞模式，则直接写入失败
 	if !block {
 		unlock(&c.lock)
 		return false
 	}
 
 	// Block on the channel. Some receiver will complete our operation for us.
+	// 下面的逻辑将挂起当前协程
+	// 获取当前协程
 	gp := getg()
+	// 获取一个sudog， releasetime
 	mysg := acquireSudog()
 	mysg.releasetime = 0
 	if t0 != 0 {
@@ -225,14 +246,15 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	}
 	// No stack splits between assigning elem and enqueuing mysg
 	// on gp.waiting where copystack can find it.
-	mysg.elem = ep
+	mysg.elem = ep // 将当前操作值复制给elem
 	mysg.waitlink = nil
-	mysg.g = gp
+	mysg.g = gp // 将gp挂着sudog
 	mysg.isSelect = false
-	mysg.c = c
+	mysg.c = c // 将chan挂着sudog
 	gp.waiting = mysg
 	gp.param = nil
-	c.sendq.enqueue(mysg)
+	c.sendq.enqueue(mysg) // 将sudog挂在当前chan的snedq中
+	// 挂起自己，开始阻塞协程
 	goparkunlock(&c.lock, waitReasonChanSend, traceEvGoBlockSend, 3)
 	// Ensure the value being sent is kept alive until the
 	// receiver copies it out. The sudog has a pointer to the
@@ -255,7 +277,9 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	if mysg.releasetime > 0 {
 		blockevent(mysg.releasetime-t0, 2)
 	}
+	// 将sudog的c归零
 	mysg.c = nil
+	// 回收sudog，等待复用
 	releaseSudog(mysg)
 	return true
 }
