@@ -454,6 +454,7 @@ func chanrecv2(c *hchan, elem unsafe.Pointer) (received bool) {
 // Otherwise, if c is closed, zeros *ep and returns (true, false).
 // Otherwise, fills in *ep with an element and returns (true, true).
 // A non-nil ep must point to the heap or the caller's stack.
+// recv方法会返回两个值，selected标识是否获取到， received标识是否接受到值
 func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool) {
 	// raceenabled: don't need to check ep, as it is always on the stack
 	// or is new memory allocated by reflect.
@@ -482,6 +483,8 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	//
 	// The order of operations is important here: reversing the operations can lead to
 	// incorrect behavior when racing with a close.
+	// 注意 此处还没加锁
+	// 非阻塞模式 && ((chan是无缓冲的 && 没有正在写入的数据) || (chan有缓冲 && chan的buf中没有元素 && 协程没有关闭))
 	if !block && (c.dataqsiz == 0 && c.sendq.first == nil ||
 		c.dataqsiz > 0 && atomic.Loaduint(&c.qcount) == 0) &&
 		atomic.Load(&c.closed) == 0 {
@@ -495,6 +498,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 
 	lock(&c.lock)
 
+	// 如果chan已关闭，并且缓冲区中没有元素了，则直接返回
 	if c.closed != 0 && c.qcount == 0 {
 		if raceenabled {
 			raceacquire(c.raceaddr())
