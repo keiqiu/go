@@ -310,16 +310,23 @@ func send(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 			c.sendx = c.recvx // c.sendx = (c.sendx+1) % c.dataqsiz
 		}
 	}
+
+	// 将要写入的ep直接写入到正在等待接收的协程（sg.elem）
 	if sg.elem != nil {
 		sendDirect(c.elemtype, sg, ep)
+
+		// 将sudog的elem归0， 接收的逻辑将会回收，参见 chan.go func@chanrecv
 		sg.elem = nil
 	}
 	gp := sg.g
+	// 释放锁
 	unlockf()
 	gp.param = unsafe.Pointer(sg)
 	if sg.releasetime != 0 {
 		sg.releasetime = cputicks()
 	}
+
+	// 将接收数据的协程从阻塞中唤醒接
 	goready(gp, skip+1)
 }
 
@@ -355,6 +362,7 @@ func recvDirect(t *_type, sg *sudog, dst unsafe.Pointer) {
 	memmove(dst, src, t.size)
 }
 
+// 关闭通道
 func closechan(c *hchan) {
 	if c == nil {
 		panic(plainError("close of nil channel"))
@@ -372,10 +380,12 @@ func closechan(c *hchan) {
 		racerelease(c.raceaddr())
 	}
 
+	// closed标记置为1
 	c.closed = 1
 
 	var glist gList
 
+	// 释放所有等待接收数据的协程
 	// release all readers
 	for {
 		sg := c.recvq.dequeue()
@@ -397,6 +407,7 @@ func closechan(c *hchan) {
 		glist.push(gp)
 	}
 
+	// 释放所有等待写入数据的协程
 	// release all writers (they will panic)
 	for {
 		sg := c.sendq.dequeue()
@@ -416,6 +427,7 @@ func closechan(c *hchan) {
 	}
 	unlock(&c.lock)
 
+	// 将上两步回收的协程唤醒
 	// Ready all Gs now that we've dropped the channel lock.
 	for !glist.empty() {
 		gp := glist.pop()
