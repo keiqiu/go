@@ -209,9 +209,9 @@ ok:
 	MOVL	AX, 0(SP)
 	MOVQ	24(SP), AX		// copy argv
 	MOVQ	AX, 8(SP)
-	CALL	runtime·args(SB)
-	CALL	runtime·osinit(SB)
-	CALL	runtime·schedinit(SB)
+	CALL	runtime·args(SB) // runtime1.go func goargs
+	CALL	runtime·osinit(SB) // see os_linux.go func osinit
+	CALL	runtime·schedinit(SB)// see proc.go func schedinit
 
 	// create a new goroutine to start program
 	MOVQ	$runtime·mainPC(SB), AX		// entry
