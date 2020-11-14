@@ -510,6 +510,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		return true, false
 	}
 
+	// 如果有等待发送数据的协程，则处理协程中的数据，但并不是直接读取协程的数据，详见recv函数
 	if sg := c.sendq.dequeue(); sg != nil {
 		// Found a waiting sender. If buffer is size 0, receive value
 		// directly from sender. Otherwise, receive from head of queue
@@ -519,6 +520,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		return true, true
 	}
 
+	// 如果buf中有数据，则从recvx中读取数据
 	if c.qcount > 0 {
 		// Receive directly from queue
 		qp := chanbuf(c, c.recvx)
@@ -539,11 +541,13 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		return true, true
 	}
 
+	// 如果非阻塞模式，直接返回
 	if !block {
 		unlock(&c.lock)
 		return false, false
 	}
 
+	// 阻塞模式下，申请个新的sudog，添加到chan的revcq中，并挂起当前携程
 	// no sender available: block on this channel.
 	gp := getg()
 	mysg := acquireSudog()
@@ -561,6 +565,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	mysg.c = c
 	gp.param = nil
 	c.recvq.enqueue(mysg)
+	// 挂起携程
 	goparkunlock(&c.lock, waitReasonChanReceive, traceEvGoBlockRecv, 3)
 
 	// someone woke us up
@@ -573,6 +578,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	}
 	closed := gp.param == nil
 	gp.param = nil
+	// sudog归0，并回收sudog
 	mysg.c = nil
 	releaseSudog(mysg)
 	return true, !closed
@@ -592,6 +598,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 // sg must already be dequeued from c.
 // A non-nil ep must point to the heap or the caller's stack.
 func recv(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
+	// 如果当前chan是无缓冲区的，则直接读取正在写入的协程的数据
 	if c.dataqsiz == 0 {
 		if raceenabled {
 			racesync(c, sg)
@@ -605,6 +612,7 @@ func recv(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 		// head of the queue. Make the sender enqueue
 		// its item at the tail of the queue. Since the
 		// queue is full, those are both the same slot.
+		// 如果为有缓冲区的chan，则表明buff已满，则从buff中读取一个，并且将协程中的数据写入到buf中，这样就能保证chan的先进先出
 		qp := chanbuf(c, c.recvx)
 		if raceenabled {
 			raceacquire(qp)
@@ -624,6 +632,7 @@ func recv(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 		}
 		c.sendx = c.recvx // c.sendx = (c.sendx+1) % c.dataqsiz
 	}
+	// elem归0
 	sg.elem = nil
 	gp := sg.g
 	unlockf()
@@ -631,6 +640,7 @@ func recv(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 	if sg.releasetime != 0 {
 		sg.releasetime = cputicks()
 	}
+	// 唤醒写入阻塞的携程
 	goready(gp, skip+1)
 }
 
