@@ -238,7 +238,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	// 下面的逻辑将挂起当前协程
 	// 获取当前协程
 	gp := getg()
-	// 获取一个sudog， releasetime
+	// 获取一个sudog， releasetime归0
 	mysg := acquireSudog()
 	mysg.releasetime = 0
 	if t0 != 0 {

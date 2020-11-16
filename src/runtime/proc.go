@@ -311,7 +311,6 @@ func goparkunlock(lock *mutex, reason waitReason, traceEv byte, traceskip int) {
 	gopark(parkunlock_c, unsafe.Pointer(lock), reason, traceEv, traceskip)
 }
 
-
 // 唤起携程
 func goready(gp *g, traceskip int) {
 	systemstack(func() {
@@ -320,7 +319,7 @@ func goready(gp *g, traceskip int) {
 }
 
 //go:nosplit
-func acquireSudog() *sudog {
+func acquireSudog() *sudog { // 获得一个sudog
 	// Delicate dance: the semaphore implementation calls
 	// acquireSudog, acquireSudog calls new(sudog),
 	// new calls malloc, malloc can call the garbage collector,
@@ -329,10 +328,14 @@ func acquireSudog() *sudog {
 	// Break the cycle by doing acquirem/releasem around new(sudog).
 	// The acquirem/releasem increments m.locks during new(sudog),
 	// which keeps the garbage collector from being invoked.
+	// 获取当前M
 	mp := acquirem()
 	pp := mp.p.ptr()
+
+	// 如果当前协程的sudog缓存长度为0
 	if len(pp.sudogcache) == 0 {
 		lock(&sched.sudoglock)
+		// 尝试从sched里获取一半容量的sudog
 		// First, try to grab a batch from central cache.
 		for len(pp.sudogcache) < cap(pp.sudogcache)/2 && sched.sudogcache != nil {
 			s := sched.sudogcache
@@ -341,11 +344,14 @@ func acquireSudog() *sudog {
 			pp.sudogcache = append(pp.sudogcache, s)
 		}
 		unlock(&sched.sudoglock)
+
+		// 如果任然没有，则创建一个新的sudog
 		// If the central cache is empty, allocate a new one.
 		if len(pp.sudogcache) == 0 {
 			pp.sudogcache = append(pp.sudogcache, new(sudog))
 		}
 	}
+	// 从sudogcache中弹出一个sudog
 	n := len(pp.sudogcache)
 	s := pp.sudogcache[n-1]
 	pp.sudogcache[n-1] = nil
@@ -377,12 +383,15 @@ func releaseSudog(s *sudog) {
 	if s.c != nil {
 		throw("runtime: sudog with non-nil c")
 	}
+	// 获取当前g
 	gp := getg()
 	if gp.param != nil {
 		throw("runtime: releaseSudog with non-nil gp.param")
 	}
+	// 获取当前m
 	mp := acquirem() // avoid rescheduling to another P
 	pp := mp.p.ptr()
+	// 如果当前p的sudogcache已经满了， 则将尾部一半还给sched的sudogcache中
 	if len(pp.sudogcache) == cap(pp.sudogcache) {
 		// Transfer half of local cache to the central cache.
 		var first, last *sudog
@@ -399,10 +408,12 @@ func releaseSudog(s *sudog) {
 			last = p
 		}
 		lock(&sched.sudoglock)
+		// 将释放的sudog加到sudogcache中
 		last.next = sched.sudogcache
 		sched.sudogcache = first
 		unlock(&sched.sudoglock)
 	}
+	// 将s加入sodogcache
 	pp.sudogcache = append(pp.sudogcache, s)
 	releasem(mp)
 }
