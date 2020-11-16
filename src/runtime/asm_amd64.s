@@ -11,14 +11,16 @@
 // internal linking. This is the entry point for the program from the
 // kernel for an ordinary -buildmode=exe program. The stack holds the
 // number of arguments and the C-style argv.
+// _rt0_amd64是amd64系统的通用启动函数，是程序的入口函数
 TEXT _rt0_amd64(SB),NOSPLIT,$-8
-	MOVQ	0(SP), DI	// argc
-	LEAQ	8(SP), SI	// argv
+	MOVQ	0(SP), DI	// argc // 设置argc
+	LEAQ	8(SP), SI	// argv // 设置argv
 	JMP	runtime·rt0_go(SB)
 
 // main is common startup code for most amd64 systems when using
 // external linking. The C startup code will call the symbol "main"
 // passing argc and argv in the usual C ABI registers DI and SI.
+// main是外链的通用启动入口，感觉是cgo用的
 TEXT main(SB),NOSPLIT,$-8
 	JMP	runtime·rt0_go(SB)
 
@@ -85,6 +87,7 @@ DATA _rt0_amd64_lib_argv<>(SB)/8, $0
 GLOBL _rt0_amd64_lib_argv<>(SB),NOPTR, $8
 
 TEXT runtime·rt0_go(SB),NOSPLIT,$0
+    // copy参数到栈中
 	// copy arguments forward on an even stack
 	MOVQ	DI, AX		// argc
 	MOVQ	SI, BX		// argv
@@ -197,33 +200,37 @@ ok:
 	MOVQ	CX, g(BX)
 	LEAQ	runtime·m0(SB), AX
 
+    // m0和g0定义在proc.go
 	// save m->g0 = g0
 	MOVQ	CX, m_g0(AX)
 	// save m0 to g0->m
 	MOVQ	AX, g_m(CX)
 
 	CLD				// convention is D is always left cleared
-	CALL	runtime·check(SB)
+	CALL	runtime·check(SB) // runtime1.go@check  主要是做一些类型大小的检查
 
 	MOVL	16(SP), AX		// copy argc
 	MOVL	AX, 0(SP)
 	MOVQ	24(SP), AX		// copy argv
 	MOVQ	AX, 8(SP)
-	CALL	runtime·args(SB) // runtime1.go func goargs
-	CALL	runtime·osinit(SB) // see os_linux.go func osinit
-	CALL	runtime·schedinit(SB)// see proc.go func schedinit
+	CALL	runtime·args(SB) // runtime1.go@args  初始化一些路径参数等
+	CALL	runtime·osinit(SB) // see os_linux.go@osinit 初始化cpu的个数和内存之类的
+	CALL	runtime·schedinit(SB)// see proc.go@schedinit 始化命令行参数、环境变量、gc、栈空间、内存管理、所有 P 实例、HASH算法等
 
+    // 创建一个新的goroutine启动程序, runtime.mainPC就是runtime.main，参见proc@main
 	// create a new goroutine to start program
 	MOVQ	$runtime·mainPC(SB), AX		// entry
 	PUSHQ	AX
 	PUSHQ	$0			// arg size
-	CALL	runtime·newproc(SB)
+	CALL	runtime·newproc(SB) // 参见proc.go@newproc 调用newproc函数，并且把runtime.main传递给他  创建一个新的goroutine，该 goroutine 绑定 runtime.main，放在 P 的本地队列，等待调度
 	POPQ	AX
 	POPQ	AX
 
+    // 参见proc.go@mstart 启动M，开始调度goroutine
 	// start this M
 	CALL	runtime·mstart(SB)
 
+    // 参见testdata\testprog\abort.go@abort 主要是回收一些异常  msatart是不会走到这里的
 	CALL	runtime·abort(SB)	// mstart should never return
 	RET
 

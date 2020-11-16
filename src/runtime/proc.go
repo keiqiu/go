@@ -98,7 +98,7 @@ var main_inittask initTask
 var main_init_done chan bool
 
 //go:linkname main_main main.main
-func main_main()
+func main_main() // 此处就是连接我们代码中main包中的main函数，go:linkname localname [importpath.name] 代码编译的时候会识别linkname关键字
 
 // mainStarted indicates that the main M has started.
 var mainStarted bool
@@ -200,7 +200,7 @@ func main() {
 		return
 	}
 	fn := main_main // make an indirect call, as the linker doesn't know the address of the main package when laying down the runtime
-	fn()
+	fn()            // 调用主程序的main函数 进入用户的程序逻辑
 	if raceenabled {
 		racefini()
 	}
@@ -543,19 +543,24 @@ func cpuinit() {
 func schedinit() {
 	// raceinit must be the first call to race detector.
 	// In particular, it must be done before mallocinit below calls racemapshadow.
+	// 获取当前线程的绑定的g,初始化时，只有主线程，返回g0
 	_g_ := getg()
 	if raceenabled {
 		_g_.racectx, raceprocctx0 = raceinit()
 	}
 
+	// 限制m的最大数量是1w
 	sched.maxmcount = 10000
 
 	tracebackinit()
 	moduledataverify()
 	stackinit()
 	mallocinit()
+	// 初始化m
 	mcommoninit(_g_.m)
-	cpuinit()       // must run before alginit
+	// 初始化cpu选项
+	cpuinit() // must run before alginit
+	//  初始化hash
 	alginit()       // maps must not be used before this call
 	modulesinit()   // provides activeModules
 	typelinksinit() // uses maps, activeModules
@@ -564,20 +569,27 @@ func schedinit() {
 	msigsave(_g_.m)
 	initSigmask = _g_.m.sigmask
 
+	// 获取命令行参数并存入argslice
 	goargs()
+	// 获取环境变量并存入envs
 	goenvs()
+	// 解析debug参数
 	parsedebugvars()
+	// 初始化gc
 	gcinit()
 
 	sched.lastpoll = uint64(nanotime())
+	// 设置p的最大数量，默认等于cpu的个数， 如果设置了gomaxprocs，就读取该数
 	procs := ncpu
 	if n, ok := atoi32(gogetenv("GOMAXPROCS")); ok && n > 0 {
 		procs = n
 	}
+	// 初始化p，并且初始化的p状态为_Pgcstop，要细看  修改 G P M 中 P 的数目
 	if procresize(procs) != nil {
 		throw("unknown runnable goroutine during bootstrap")
 	}
 
+	// 写屏障的内容 不是很懂
 	// For cgocheck > 1, we turn on the write barrier at all times
 	// and check all pointer writes. We can't do this until after
 	// procresize because the write barrier needs a P.
@@ -2478,7 +2490,7 @@ func injectglist(glist *gList) {
 
 // One round of scheduler: find a runnable goroutine and execute it.
 // Never returns.
-func schedule() {
+func schedinitschedule() {
 	_g_ := getg()
 
 	if _g_.m.locks != 0 {
@@ -3268,11 +3280,19 @@ func malg(stacksize int32) *g {
 // are available sequentially after &fn; they would not be
 // copied if a stack split occurred.
 //go:nosplit
-func newproc(siz int32, fn *funcval) {
+func newproc(siz int32, fn *funcval) { // fn就是proc.go@main函数
+	// siz为argsize
+	// argp为第一个参数
 	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
+	// 获取当前的goroutine 此时应该是g0
 	gp := getg()
+	// 获取当前程序计数器pc地址
 	pc := getcallerpc()
+
+	// systemstack的作用是切换到g0栈执行作为参数的函数
+	// 我们这个场景现在本身就在g0栈，因此什么也不做，直接调用作为参数的函数
 	systemstack(func() {
+		// 切换到 g0 调用 newproc1
 		newproc1(fn, (*uint8)(argp), siz, gp, pc)
 	})
 }
@@ -3281,12 +3301,15 @@ func newproc(siz int32, fn *funcval) {
 // at argp. callerpc is the address of the go statement that created
 // this. The new g is put on the queue of g's waiting to run.
 func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintptr) {
+	// 获取当前g，此处为g0，如果newproc调用的话，callergp也是g0， 如果通过go关键字调用 则callergp不是g0
 	_g_ := getg()
 
 	if fn == nil {
 		_g_.m.throwing = -1 // do not dump full stacks
 		throw("go of nil func value")
 	}
+
+	// _g_.m.locks++ 禁止抢占当前协程
 	acquirem() // disable preemption because it can be holding p in a local var
 	siz := narg
 	siz = (siz + 7) &^ 7
