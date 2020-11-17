@@ -52,6 +52,9 @@ func (o *Once) Do(f func()) {
 	// This is why the slow path falls back to a mutex, and why
 	// the atomic.StoreUint32 must be delayed until after f returns.
 
+	// 此处不能使用cas操作将o.done从0变成1，当o.done=1时，必须保证f已经执行。cas操作无法保证
+	// 此处使用原子读，来清楚多核cpu架构下cache可见性带来的影响
+	// 其实此处不用原子读，也问题不大，在doslow函数中使用了lock，也可以规避这个问题。但是这里通过原子读，可以避免大家去竞争锁，提高性能
 	if atomic.LoadUint32(&o.done) == 0 {
 		// Outlined slow-path to allow inlining of the fast-path.
 		o.doSlow(f)
@@ -59,9 +62,12 @@ func (o *Once) Do(f func()) {
 }
 
 func (o *Once) doSlow(f func()) {
+	// 加锁
 	o.m.Lock()
 	defer o.m.Unlock()
+	// 再读一次，防止上一个进程已经修改了o.done，由于锁的存在，此处是可见的
 	if o.done == 0 {
+		// 此处将o.done修改为1，不知道为什么要用原子操作，都在锁里了，为什么还要担心并发修改了
 		defer atomic.StoreUint32(&o.done, 1)
 		f()
 	}
