@@ -163,6 +163,7 @@ func main() {
 	// Record when the world started.
 	runtimeInitTime = nanotime()
 
+	// 开启垃圾回收
 	gcenable()
 
 	main_init_done = make(chan bool)
@@ -1228,7 +1229,7 @@ func mstart1() {
 		mstartm0()
 	}
 
-	// 如果有m的起始任务函数，则执行，比如 sysmon 函数
+	// 如果有m的起始任务函数，则执行，比如 newm、mspinning 函数
 	// 对于m0来说，是没有 mstartfn 的
 	if fn := _g_.m.mstartfn; fn != nil {
 		fn()
@@ -1239,7 +1240,8 @@ func mstart1() {
 		acquirep(_g_.m.nextp.ptr())
 		_g_.m.nextp = 0
 	}
-	// 参见src\cmd\compile\internal\ssa\schedule.go@schedule
+
+	// proc.go@schedinitschedule()
 	schedule()
 }
 
