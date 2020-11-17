@@ -476,6 +476,7 @@ var (
 	allglock mutex
 )
 
+// 将g添加到全局的allgs切片中
 func allgadd(gp *g) {
 	if readgstatus(gp) == _Gidle {
 		throw("allgadd: bad status Gidle")
@@ -560,7 +561,7 @@ func schedinit() {
 	mcommoninit(_g_.m)
 	// 初始化cpu选项
 	cpuinit() // must run before alginit
-	//  初始化hash
+	//  初始化hash函数
 	alginit()       // maps must not be used before this call
 	modulesinit()   // provides activeModules
 	typelinksinit() // uses maps, activeModules
@@ -795,6 +796,7 @@ func castogscanstatus(gp *g, oldval, newval uint32) bool {
 // casgstatus will loop if the g->atomicstatus is in a Gscan status until the routine that
 // put it in the Gscan state is finished.
 //go:nosplit
+// 如果g的状态为oldval，则修改到新的状态
 func casgstatus(gp *g, oldval, newval uint32) {
 	if (oldval&_Gscan != 0) || (newval&_Gscan != 0) || oldval == newval {
 		systemstack(func() {
@@ -1170,6 +1172,8 @@ func startTheWorldWithSema(emitTraceEvent bool) int64 {
 //go:nosplit
 //go:nowritebarrierrec
 func mstart() {
+	// 初始化完成，开始启动程序了
+	// 这里获取的g是g0，在系统堆栈
 	_g_ := getg()
 
 	osStack := _g_.stack.lo == 0
@@ -1204,7 +1208,7 @@ func mstart() {
 
 func mstart1() {
 	_g_ := getg()
-
+	// 获取g， 如果当前不是g0，报错
 	if _g_ != _g_.m.g0 {
 		throw("bad runtime·mstart")
 	}
@@ -1219,18 +1223,23 @@ func mstart1() {
 
 	// Install signal handlers; after minit so that minit can
 	// prepare the thread to be able to handle the signals.
+	// 如果当前g的m是初始m0，执行mstartm0()
 	if _g_.m == &m0 {
 		mstartm0()
 	}
 
+	// 如果有m的起始任务函数，则执行，比如 sysmon 函数
+	// 对于m0来说，是没有 mstartfn 的
 	if fn := _g_.m.mstartfn; fn != nil {
 		fn()
 	}
 
-	if _g_.m != &m0 {
+	if _g_.m != &m0 { // 如果不是m0，需要绑定p
+		// 绑定p
 		acquirep(_g_.m.nextp.ptr())
 		_g_.m.nextp = 0
 	}
+	// 参见src\cmd\compile\internal\ssa\schedule.go@schedule
 	schedule()
 }
 
@@ -3260,6 +3269,7 @@ func syscall_runtime_AfterExec() {
 }
 
 // Allocate a new g, with a stack big enough for stacksize bytes.
+// 创建一个指定大小栈的g
 func malg(stacksize int32) *g {
 	newg := new(g)
 	if stacksize >= 0 {
@@ -3416,8 +3426,10 @@ func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintpt
 	if trace.enabled {
 		traceGoCreate(newg, newg.startpc)
 	}
+	// 将当前的newg插入到当前的p中的下一个调度位
 	runqput(_p_, newg, true)
 
+	// 如果有其它空闲的 P，并且没有 M 处于自旋等待 P 或 G，以及当前 g 不是 main goroutine
 	if atomic.Load(&sched.npidle) != 0 && atomic.Load(&sched.nmspinning) == 0 && mainStarted {
 		wakep()
 	}
@@ -3461,13 +3473,16 @@ func saveAncestors(callergp *g) *[]ancestorInfo {
 
 // Put on gfree list.
 // If local list is too long, transfer a batch to the global list.
+// 将空闲的g归还至p空闲g队列，如果p的空闲g太多了，就归还到全局的
 func gfput(_p_ *p, gp *g) {
 	if readgstatus(gp) != _Gdead {
 		throw("gfput: bad status (not Gdead)")
 	}
 
+	// 计算g的栈空间大小
 	stksize := gp.stack.hi - gp.stack.lo
 
+	// 如果栈大小不是个固定的栈，则清空当前g的栈空间
 	if stksize != _FixedStack {
 		// non-standard stack size - free it.
 		stackfree(gp.stack)
@@ -3476,13 +3491,17 @@ func gfput(_p_ *p, gp *g) {
 		gp.stackguard0 = 0
 	}
 
+	// 归还至p的本地空闲g队列中
 	_p_.gFree.push(gp)
 	_p_.gFree.n++
+
+	// 如果当前p的本地空闲g队列中的数量超过64，则迁移至少
 	if _p_.gFree.n >= 64 {
 		lock(&sched.gFree.lock)
 		for _p_.gFree.n >= 32 {
 			_p_.gFree.n--
 			gp = _p_.gFree.pop()
+			// 根据stack是否被清理 归还至不同的地方
 			if gp.stack.lo == 0 {
 				sched.gFree.noStack.push(gp)
 			} else {
@@ -3496,10 +3515,14 @@ func gfput(_p_ *p, gp *g) {
 
 // Get from gfree list.
 // If local list is empty, grab a batch from global list.
+// 从p中获取空闲的g，如果p本地没有 就从全局获取
 func gfget(_p_ *p) *g {
 retry:
+	// 当前p的本地空闲g是空的 && 全局的空闲g队列（有栈或者无栈）不为空
 	if _p_.gFree.empty() && (!sched.gFree.stack.empty() || !sched.gFree.noStack.empty()) {
+		// 加锁
 		lock(&sched.gFree.lock)
+		// 向p的本地空闲g队列添加至多32个空闲g
 		// Move a batch of free Gs to the P.
 		for _p_.gFree.n < 32 {
 			// Prefer Gs with stacks.
@@ -3517,11 +3540,16 @@ retry:
 		unlock(&sched.gFree.lock)
 		goto retry
 	}
+
+	// 弹出一个空闲p
 	gp := _p_.gFree.pop()
 	if gp == nil {
 		return nil
 	}
+	// 当前p空闲g数量减1
 	_p_.gFree.n--
+
+	// 当前gp的栈的低位是0，则说明需要重新分配栈空间
 	if gp.stack.lo == 0 {
 		// Stack was deallocated in gfput. Allocate a new one.
 		systemstack(func() {
@@ -4047,8 +4075,10 @@ func (pp *p) destroy() {
 // gcworkbufs are not being modified by either the GC or
 // the write barrier code.
 // Returns list of Ps with local work, they need to be scheduled by the caller.
+// 调整分配p的数量
 func procresize(nprocs int32) *p {
 	old := gomaxprocs
+	// 如果 gomaxprocs <=0 抛出异常
 	if old < 0 || nprocs <= 0 {
 		throw("procresize: invalid arg")
 	}
@@ -4058,12 +4088,14 @@ func procresize(nprocs int32) *p {
 
 	// update statistics
 	now := nanotime()
+	// 更新全局状态统计
 	if sched.procresizetime != 0 {
 		sched.totaltime += int64(old) * (now - sched.procresizetime)
 	}
 	sched.procresizetime = now
 
 	// Grow allp if necessary.
+	// 如果要修改的p的数量比当前p的数量多，则需要对allp这个slice进行容量修改
 	if nprocs > int32(len(allp)) {
 		// Synchronize with retake, which could be running
 		// concurrently since it doesn't run on a P.
@@ -4081,6 +4113,7 @@ func procresize(nprocs int32) *p {
 	}
 
 	// initialize new P's
+	// 如果是扩容，则新增p，如果减少p的数量怎么弄呢？
 	for i := old; i < nprocs; i++ {
 		pp := allp[i]
 		if pp == nil {
@@ -4090,6 +4123,7 @@ func procresize(nprocs int32) *p {
 		atomicstorep(unsafe.Pointer(&allp[i]), unsafe.Pointer(pp))
 	}
 
+	// 如果当前的M已经绑定P，继续使用，否则将当前的M绑定一个P
 	_g_ := getg()
 	if _g_.m.p != 0 && _g_.m.p.ptr().id < nprocs {
 		// continue to use the current P
@@ -4116,12 +4150,15 @@ func procresize(nprocs int32) *p {
 		p := allp[0]
 		p.m = 0
 		p.status = _Pidle
+		// 获取allp[0],将当前的m和p绑定
 		acquirep(p)
 		if trace.enabled {
 			traceGoStart()
 		}
 	}
 
+	// 如果是扩容，这里是没法执行的，扩容的时候old < nprocs;
+	// 所以此处的逻辑是如果是减少p的数量，则从尾巴开始销毁旧的没有用的p，
 	// release resources from unused P's
 	for i := nprocs; i < old; i++ {
 		p := allp[i]
@@ -4130,6 +4167,7 @@ func procresize(nprocs int32) *p {
 	}
 
 	// Trim allp.
+	// 如果不等于，进行截取
 	if int32(len(allp)) != nprocs {
 		lock(&allpLock)
 		allp = allp[:nprocs]
@@ -4139,11 +4177,13 @@ func procresize(nprocs int32) *p {
 	var runnablePs *p
 	for i := nprocs - 1; i >= 0; i-- {
 		p := allp[i]
+		// 如果是当前的M绑定的P，不放入P空闲链表
+		// 否则更改P的状态为_Pidle，放入P空闲链表
 		if _g_.m.p.ptr() == p {
 			continue
 		}
 		p.status = _Pidle
-		if runqempty(p) {
+		if runqempty(p) { // 将空闲p放入空闲链表
 			pidleput(p)
 		} else {
 			p.m.set(mget())
@@ -4163,6 +4203,7 @@ func procresize(nprocs int32) *p {
 // isn't because it immediately acquires _p_.
 //
 //go:yeswritebarrierrec
+// 将当前的M和p绑定
 func acquirep(_p_ *p) {
 	// Do the part that isn't allowed to have write barriers.
 	wirep(_p_)
@@ -4760,6 +4801,7 @@ func globrunqget(_p_ *p, max int32) *g {
 // Sched must be locked.
 // May run during STW, so write barriers are not allowed.
 //go:nowritebarrierrec
+// 将P放入空闲P列表，并将sched.npidle加1
 func pidleput(_p_ *p) {
 	if !runqempty(_p_) {
 		throw("pidleput: P has non-empty run queue")
@@ -4773,6 +4815,7 @@ func pidleput(_p_ *p) {
 // Sched must be locked.
 // May run during STW, so write barriers are not allowed.
 //go:nowritebarrierrec
+// 从空闲的p队列中获取一个p
 func pidleget() *p {
 	_p_ := sched.pidle.ptr()
 	if _p_ != nil {
@@ -4784,6 +4827,7 @@ func pidleget() *p {
 
 // runqempty reports whether _p_ has no Gs on its local run queue.
 // It never returns true spuriously.
+// p是不是空闲状态
 func runqempty(_p_ *p) bool {
 	// Defend against a race where 1) _p_ has G1 in runqnext but runqhead == runqtail,
 	// 2) runqput on _p_ kicks G1 to the runq, 3) runqget on _p_ empties runqnext.
@@ -4815,13 +4859,16 @@ const randomizeScheduler = raceenabled
 // If next is true, runqput puts g in the _p_.runnext slot.
 // If the run queue is full, runnext puts g on the global queue.
 // Executed only by the owner P.
+// 向p添加一个gorotinue，如果本地p的满了，则添加到全局
 func runqput(_p_ *p, gp *g, next bool) {
 	if randomizeScheduler && next && fastrand()%2 == 0 {
 		next = false
 	}
 
+	// 如果 next = true，将 gp 设置为下一个运行的 goroutine
 	if next {
 	retryNext:
+		// _p_.runnext 会在 runqgrab 中被并发访问，所以需要采用原子操作
 		oldnext := _p_.runnext
 		if !_p_.runnext.cas(oldnext, guintptr(unsafe.Pointer(gp))) {
 			goto retryNext
@@ -4834,6 +4881,7 @@ func runqput(_p_ *p, gp *g, next bool) {
 	}
 
 retry:
+	// 添加到本地无锁循环队列
 	h := atomic.LoadAcq(&_p_.runqhead) // load-acquire, synchronize with consumers
 	t := _p_.runqtail
 	if t-h < uint32(len(_p_.runq)) {
@@ -4841,6 +4889,7 @@ retry:
 		atomic.StoreRel(&_p_.runqtail, t+1) // store-release, makes the item available for consumption
 		return
 	}
+	// 如果本地队列满了，则将本地队列半数的 goroutine 转移到全局 shced.runq
 	if runqputslow(_p_, gp, h, t) {
 		return
 	}
