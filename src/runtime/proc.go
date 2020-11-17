@@ -3282,7 +3282,7 @@ func malg(stacksize int32) *g {
 //go:nosplit
 func newproc(siz int32, fn *funcval) { // fn就是proc.go@main函数
 	// siz为argsize
-	// argp为第一个参数
+	// argp为参数个数
 	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
 	// 获取当前的goroutine 此时应该是g0
 	gp := getg()
@@ -3318,21 +3318,29 @@ func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintpt
 	// Not worth it: this is almost always an error.
 	// 4*sizeof(uintreg): extra space added below
 	// sizeof(uintreg): caller's LR (arm) or return address (x86, in gostartcall).
+	// 如果函数的参数个数太多了，直接报错
 	if siz >= _StackMin-4*sys.RegSize-sys.RegSize {
 		throw("newproc: function arguments too large for new goroutine")
 	}
 
+	// 从g0的m0中获取p
 	_p_ := _g_.m.p.ptr()
+
+	// 找下有没有空闲的goruntine，启动时刻肯定是没有
 	newg := gfget(_p_)
+
 	if newg == nil {
+		// 回收列表中不存在可用goroutine,则重新分配一个goroutine结构和2k大小的栈空间，栈空间使用内核分配
 		newg = malg(_StackMin)
+		// 将g的状态由_Gidle改为_Gdead
 		casgstatus(newg, _Gidle, _Gdead)
+		// 添加到allg数组， 防止gc找不到而回收掉
 		allgadd(newg) // publishes with a g->status of Gdead so GC scanner doesn't look at uninitialized stack.
 	}
 	if newg.stack.hi == 0 {
 		throw("newproc1: newg missing stack")
 	}
-
+	// g的状态如果不为_Gdead则报错
 	if readgstatus(newg) != _Gdead {
 		throw("newproc1: new g is not Gdead")
 	}
@@ -3347,6 +3355,8 @@ func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintpt
 		prepGoExitFrame(sp)
 		spArg += sys.MinFrameSize
 	}
+
+	// 如果有参数 处理参数
 	if narg > 0 {
 		memmove(unsafe.Pointer(spArg), unsafe.Pointer(argp), uintptr(narg))
 		// This is a stack-to-stack copy. If write barriers
@@ -3366,14 +3376,19 @@ func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintpt
 		}
 	}
 
+	// 初始化G的gobuf，保存sp，pc，任务函数等
 	memclrNoHeapPointers(unsafe.Pointer(&newg.sched), unsafe.Sizeof(newg.sched))
 	newg.sched.sp = sp
 	newg.stktopsp = sp
+	// 保存goexit的地址到sched.pc，后面会调节 goexit 作为任务函数返回后执行的地址，所以goroutine结束后会调用goexit
 	newg.sched.pc = funcPC(goexit) + sys.PCQuantum // +PCQuantum so that previous instruction is in same function
+	// sched.g保存当前新的G
 	newg.sched.g = guintptr(unsafe.Pointer(newg))
+	// 存储回调函数
 	gostartcallfn(&newg.sched, fn)
 	newg.gopc = callerpc
 	newg.ancestors = saveAncestors(callergp)
+	// 任务函数的地址
 	newg.startpc = fn.fn
 	if _g_.m.curg != nil {
 		newg.labels = _g_.m.curg.labels
@@ -3382,6 +3397,7 @@ func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintpt
 		atomic.Xadd(&sched.ngsys, +1)
 	}
 	newg.gcscanvalid = false
+	// 协程初始化好了，将状态由_Gdead调整为_Grunnable
 	casgstatus(newg, _Gdead, _Grunnable)
 
 	if _p_.goidcache == _p_.goidcacheend {
@@ -3405,6 +3421,7 @@ func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintpt
 	if atomic.Load(&sched.npidle) != 0 && atomic.Load(&sched.nmspinning) == 0 && mainStarted {
 		wakep()
 	}
+	// 释放当前_g_.m，允许抢占
 	releasem(_g_.m)
 }
 
