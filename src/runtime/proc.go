@@ -130,7 +130,7 @@ func main() {
 	// Allow newproc to start new Ms.
 	mainStarted = true
 
-	// 执行sysmon
+	// 切到系统栈，生成一个线程执行sysmon
 	if GOARCH != "wasm" { // no threads on wasm yet, so no sysmon
 		systemstack(func() {
 			newm(sysmon, nil)
@@ -1238,7 +1238,7 @@ func mstart1() {
 		fn()
 	}
 
-	if _g_.m != &m0 { // 如果不是m0，需要绑定p
+	if _g_.m != &m0 { // 如果不是m0，需要绑定p ,g0的m还有可能不是m0？ g0已经绑定了m0 m0在初始化p的时候，也顺手把自己绑定了呀 看不懂
 		// 绑定p
 		acquirep(_g_.m.nextp.ptr())
 		_g_.m.nextp = 0
@@ -2781,6 +2781,7 @@ func goexit0(gp *g) {
 //
 //go:nosplit
 //go:nowritebarrierrec
+// 设置当前g的运行现场
 func save(pc, sp uintptr) {
 	_g_ := getg()
 
@@ -3316,7 +3317,7 @@ func newproc(siz int32, fn *funcval) { // fn就是proc.go@main函数
 // at argp. callerpc is the address of the go statement that created
 // this. The new g is put on the queue of g's waiting to run.
 func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintptr) {
-	// 获取当前g，此处为g0，如果newproc调用的话，callergp也是g0， 如果通过go关键字调用 则callergp不是g0
+	// 获取当前g，如果newproc调用的话，callergp也是g0， 如果通过go关键字调用 则callergp不是g0
 	_g_ := getg()
 
 	if fn == nil {
@@ -3338,7 +3339,7 @@ func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintpt
 		throw("newproc: function arguments too large for new goroutine")
 	}
 
-	// 从g0的m0中获取p
+	// 从g的m中获取p
 	_p_ := _g_.m.p.ptr()
 
 	// 找下有没有空闲的goruntine，启动时刻肯定是没有
@@ -3423,6 +3424,7 @@ func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintpt
 		_p_.goidcache -= _GoidCacheBatch - 1
 		_p_.goidcacheend = _p_.goidcache + _GoidCacheBatch
 	}
+	// 设置g的id
 	newg.goid = int64(_p_.goidcache)
 	_p_.goidcache++
 	if raceenabled {
@@ -4128,7 +4130,8 @@ func procresize(nprocs int32) *p {
 		atomicstorep(unsafe.Pointer(&allp[i]), unsafe.Pointer(pp))
 	}
 
-	// 如果当前的M已经绑定P，继续使用，否则将当前的M绑定一个P
+	// 如果当前的M已经绑定P并且不在要销毁的p中，继续使用，否则将当前的M绑定一个P
+	// 初始化时只有m0 和 g0，没有p，这是创建了p，然后将m0绑定到一个p上
 	_g_ := getg()
 	if _g_.m.p != 0 && _g_.m.p.ptr().id < nprocs {
 		// continue to use the current P
@@ -4140,6 +4143,7 @@ func procresize(nprocs int32) *p {
 		// We must do this before destroying our current P
 		// because p.destroy itself has write barriers, so we
 		// need to do that from a valid P.
+		// 当前p运行在要销毁的M上
 		if _g_.m.p != 0 {
 			if trace.enabled {
 				// Pretend that we were descheduled
@@ -4148,6 +4152,7 @@ func procresize(nprocs int32) *p {
 				traceGoSched()
 				traceProcStop(_g_.m.p.ptr())
 			}
+			// 将当前的p与m解绑
 			_g_.m.p.ptr().m = 0
 		}
 		_g_.m.p = 0
