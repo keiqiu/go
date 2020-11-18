@@ -479,7 +479,7 @@ type g struct {
 }
 
 type m struct {
-	// 用来执行调度指令的 goroutine,好像不是全局的g0
+	// 每个线程都会有自己的一个单独的g0， 这个g0与全局的g0不是同一个
 	g0      *g     // goroutine with scheduling stack
 	morebuf gobuf  // gobuf arg to morestack
 	divmod  uint32 // div/mod denominator for arm - known to liblink
@@ -597,7 +597,7 @@ type p struct {
 	goidcacheend uint64
 
 	// Queue of runnable goroutines. Accessed without lock.
-	// 可运行的goroutine的队列的队头和队尾，队列是个长度256的数组，由两个游标来控制头尾
+	// 可运行的goroutine的队列的队头和队尾，队列是个长度256的数组，由两个游标来控制头尾, 如果runqhead==runqtail && runnext=0那么当前p是空闲的
 	runqhead uint32
 	runqtail uint32
 	runq     [256]guintptr
@@ -993,15 +993,23 @@ func (w waitReason) String() string {
 }
 
 var (
-	allglen    uintptr
-	allm       *m
-	allp       []*p  // len(allp) == gomaxprocs; may change at safe points, otherwise immutable
-	allpLock   mutex // Protects P-less reads of allp and all writes
+	// 所有的g的数量 等于len(allgs)
+	allglen uintptr
+	// 所有的m链表，指向链表头，通过m.alllink来维护
+	allm *m
+	// 所有的p
+	allp []*p // len(allp) == gomaxprocs; may change at safe points, otherwise immutable
+	// allp的读写锁
+	allpLock mutex // Protects P-less reads of allp and all writes
+	// 最多协程数，可以通过runtime.GOMAXPROCS函数修改
 	gomaxprocs int32
-	ncpu       int32
-	forcegc    forcegcstate
-	sched      schedt
-	newprocs   int32
+	// cpu个数
+	ncpu    int32
+	forcegc forcegcstate
+	// 调度状态
+	sched schedt
+	// 设置的新的p的数量，该值正常情况下与gomaxprocs相同，但通过runtime.GOMAXPROCS(debug.go@GOMAXPROCS)函数时，先修改newprocs，然后等待调用proc.go@procresize成功调整p的数量后，再修改gomaxprocs
+	newprocs int32
 
 	// Information about what cpu features are available.
 	// Packages outside the runtime should not use these
