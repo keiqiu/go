@@ -277,7 +277,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	if mysg.releasetime > 0 {
 		blockevent(mysg.releasetime-t0, 2)
 	}
-	// 将sudog的c归零
+	// 将sudog关联的channel归零
 	mysg.c = nil
 	// 回收sudog，等待复用
 	releaseSudog(mysg)
