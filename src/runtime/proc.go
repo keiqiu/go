@@ -79,6 +79,7 @@ var modinfo string
 // sloppy about thread unparking when submitting to global queue. Also see comments
 // for nmspinning manipulation.
 
+// 此处定义了m0和g0，其结构初始化是汇编中完成
 var (
 	m0           m
 	g0           g
@@ -129,6 +130,7 @@ func main() {
 	// Allow newproc to start new Ms.
 	mainStarted = true
 
+	// 执行sysmon
 	if GOARCH != "wasm" { // no threads on wasm yet, so no sysmon
 		systemstack(func() {
 			newm(sysmon, nil)
@@ -224,6 +226,7 @@ func main() {
 	}
 
 	exit(0)
+	// 如果exit0没有退出，则循环读取内存地址为0的位置，产生越界，会引起操作系统关闭该进程
 	for {
 		var x *int32
 		*x = 0
@@ -473,7 +476,7 @@ func lockedOSThread() bool {
 }
 
 var (
-	allgs    []*g
+	allgs    []*g // 全局的g队列，当申请g时，先找本地p的，没有找全局的，全局没有就生成新的
 	allglock mutex
 )
 
@@ -4378,9 +4381,22 @@ var forcegcperiod int64 = 2 * 60 * 1e9
 // Always runs without a P, so write barriers are not allowed.
 //
 //go:nowritebarrierrec
+// 系统后台监控，而且这个函数不符合GPM模型，该函数直接占用一个M，且不需要P，没有任何上下文切换，用不着P
+// sysmon中有netpool(获取fd事件), retake(抢占), forcegc(按时间强制执行gc),
+// sysmon 内部是个死循环，主要负责以下几件事情:
+//
+// checkdead，检查是否所有 goroutine 都已经锁死，如果是的话，直接调用 runtime.throw，强制退出。这个操作只在启动的时候做一次
+//
+// 将 netpoll 返回的结果注入到全局 sched 的任务队列
+//
+// 收回因为 syscall 而长时间阻塞的 p，同时抢占那些执行时间过长的 g
+//
+// 如果 span 内存闲置超过 5min，那么释放掉
 func sysmon() {
 	lock(&sched.lock)
+	// m数量加1
 	sched.nmsys++
+	// 检查是否有死锁
 	checkdead()
 	unlock(&sched.lock)
 
@@ -4388,14 +4404,17 @@ func sysmon() {
 	idle := 0 // how many cycles in succession we had not wokeup somebody
 	delay := uint32(0)
 	for {
+		// 初始化时 20us sleep
 		if idle == 0 { // start with 20us sleep...
 			delay = 20
 		} else if idle > 50 { // start doubling the sleep after 1ms...
 			delay *= 2
 		}
+		// 最多不超过10ms
 		if delay > 10*1000 { // up to 10ms
 			delay = 10 * 1000
 		}
+		// 休眠
 		usleep(delay)
 		if debug.schedtrace <= 0 && (sched.gcwaiting != 0 || atomic.Load(&sched.npidle) == uint32(gomaxprocs)) {
 			lock(&sched.lock)
@@ -4803,7 +4822,7 @@ func globrunqget(_p_ *p, max int32) *g {
 // Sched must be locked.
 // May run during STW, so write barriers are not allowed.
 //go:nowritebarrierrec
-// 将P放入空闲P列表，并将sched.npidle加1
+// 将P放入空闲P链表，并将sched.npidle加1
 func pidleput(_p_ *p) {
 	if !runqempty(_p_) {
 		throw("pidleput: P has non-empty run queue")
@@ -4817,7 +4836,7 @@ func pidleput(_p_ *p) {
 // Sched must be locked.
 // May run during STW, so write barriers are not allowed.
 //go:nowritebarrierrec
-// 从空闲的p队列中获取一个p
+// 从空闲的p链表中获取一个p
 func pidleget() *p {
 	_p_ := sched.pidle.ptr()
 	if _p_ != nil {
