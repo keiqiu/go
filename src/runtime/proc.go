@@ -4216,6 +4216,7 @@ func (pp *p) destroy() {
 // the write barrier code.
 // Returns list of Ps with local work, they need to be scheduled by the caller.
 // 调整分配p的数量
+// 调用此函数时，处于STW状态，所有协程都没执行
 func procresize(nprocs int32) *p {
 	old := gomaxprocs
 	// 如果 gomaxprocs <=0 抛出异常
