@@ -13,6 +13,7 @@ import (
 
 // adjust Gobuf as if it executed a call to fn with context ctxt
 // and then did an immediate gosave.
+// 调整gobuf，将pc移到sp， fn移到pc 设置ctxt
 func gostartcall(buf *gobuf, fn, ctxt unsafe.Pointer) {
 	sp := buf.sp
 	if sys.RegSize > sys.PtrSize {

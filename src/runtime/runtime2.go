@@ -313,13 +313,15 @@ type gobuf struct {
 	// and restores it doesn't need write barriers. It's still
 	// typed as a pointer so that any other writes from Go get
 	// write barriers.
-	sp   uintptr  // 自定义的sp寄存器
-	pc   uintptr  // 自定义的pc寄存器
-	g    guintptr // g 指针
-	ctxt unsafe.Pointer
+	sp   uintptr        // 自定义的sp寄存器
+	pc   uintptr        // 自定义的pc寄存器，初始化时是执行函数的入口
+	g    guintptr       // g 指针
+	ctxt unsafe.Pointer //
 	ret  sys.Uintreg
 	lr   uintptr
-	bp   uintptr // for GOEXPERIMENT=framepointer
+
+	// 保存CPU的rip寄存器的值
+	bp uintptr // for GOEXPERIMENT=framepointer
 }
 
 // sudog represents a g in a wait list, such as for sending/receiving
@@ -431,18 +433,19 @@ type g struct {
 	// g被阻塞的大致时间
 	waitsince int64 // approx time when the g become blocked
 	// 当ststus=Gwaiting时，waitreason表示被阻塞的原因
-	waitreason     waitReason // if status==Gwaiting
-	preempt        bool       // preemption signal, duplicates stackguard0 = stackpreempt
-	paniconfault   bool       // panic (instead of crash) on unexpected fault address
-	preemptscan    bool       // preempted g does scan for gc
-	gcscandone     bool       // g has scanned stack; protected by _Gscan bit in status
-	gcscanvalid    bool       // false at start of gc cycle, true if G has not run since last scan; TODO: remove?
-	throwsplit     bool       // must not split stack
-	raceignore     int8       // ignore race detection events
-	sysblocktraced bool       // StartTrace has emitted EvGoInSyscall about this goroutine
-	sysexitticks   int64      // cputicks when syscall has returned (for tracing)
-	traceseq       uint64     // trace event sequencer
-	tracelastp     puintptr   // last P emitted an event for this goroutine
+	waitreason waitReason // if status==Gwaiting
+	// 抢占调度标志，如果需要抢占调度，设置preempt为true
+	preempt        bool     // preemption signal, duplicates stackguard0 = stackpreempt
+	paniconfault   bool     // panic (instead of crash) on unexpected fault address
+	preemptscan    bool     // preempted g does scan for gc
+	gcscandone     bool     // g has scanned stack; protected by _Gscan bit in status
+	gcscanvalid    bool     // false at start of gc cycle, true if G has not run since last scan; TODO: remove?
+	throwsplit     bool     // must not split stack
+	raceignore     int8     // ignore race detection events
+	sysblocktraced bool     // StartTrace has emitted EvGoInSyscall about this goroutine
+	sysexitticks   int64    // cputicks when syscall has returned (for tracing)
+	traceseq       uint64   // trace event sequencer
+	tracelastp     puintptr // last P emitted an event for this goroutine
 	// 被锁定到当前m
 	lockedm muintptr
 	// 好像是个什么信号
@@ -489,8 +492,9 @@ type m struct {
 	gsignal    *g           // signal-handling g
 	goSigStack gsignalStack // Go-allocated signal handling stack
 	sigmask    sigset       // storage for saved signal mask
-	tls        [6]uintptr   // thread-local storage (for x86 extern register)
-	// m的启动任务，启动m的时候回执行，如sysmon
+	// 通过TLS实现m结构体对象与工作线程之间的绑定
+	tls [6]uintptr // thread-local storage (for x86 extern register)
+	// m的启动任务，启动m的时候会执行，如sysmon
 	mstartfn func()
 	// 当前正在运行的g
 	curg *g // current running goroutine
@@ -513,7 +517,7 @@ type m struct {
 	dying int32
 	// cpu的hz数
 	profilehz int32
-	// m是否自旋，自旋就表示M正在找G来运行，失业找工作中
+	// 工作线程在从其它工作线程的本地运行队列中盗取goroutine时的状态称为自旋状态
 	spinning bool // m is out of work and is actively looking for work
 	// m是否被阻塞
 	blocked     bool // m is blocked on a note
@@ -522,7 +526,8 @@ type m struct {
 	// m正在执行cgo
 	incgo bool // m is executing a cgo call
 	// 如果freewait==0，则可以安全的清空g0和回收m
-	freeWait   uint32 // if == 0, safe to free g0 and delete m (atomic)
+	freeWait uint32 // if == 0, safe to free g0 and delete m (atomic)
+	// 做的一个快速随机数，用于生成随机数，如调度中从其他p偷取g时，就随机从其中某一个开始偷
 	fastrand   [2]uint32
 	needextram bool
 	traceback  uint8
@@ -532,7 +537,11 @@ type m struct {
 	ncgo          int32       // number of cgo calls currently in progress
 	cgoCallersUse uint32      // if non-zero, cgoCallers in use temporarily
 	cgoCallers    *cgoCallers // cgo traceback if crashing in cgo call
-	park          note
+
+	// 没有goroutine需要运行时，工作线程睡眠在这个park成员上，
+	// 其它线程通过这个park唤醒该工作线程
+	park note
+
 	// 用户维护allm， allm是一个单向的m链表
 	alllink   *m // on allm
 	schedlink muintptr
@@ -576,7 +585,7 @@ type p struct {
 	status uint32 // one of pidle/prunning/...
 	// 单向链表，指向下一个p
 	link puintptr
-	// 每进行一次scheduler加1
+	// 每进行一次scheduler调度加1
 	schedtick uint32 // incremented on every scheduler call
 	// 每进行一次system call加1
 	syscalltick uint32 // incremented on every system call
@@ -597,7 +606,7 @@ type p struct {
 	goidcacheend uint64
 
 	// Queue of runnable goroutines. Accessed without lock.
-	// 可运行的goroutine的队列的队头和队尾，队列是个长度256的数组，由两个游标来控制头尾, 如果runqhead==runqtail && runnext=0那么当前p是空闲的
+	// 可运行的goroutine的队列的队头和队尾，队列是个长度256的数组，由两个游标来控制头尾,行程环形队列, 如果runqhead==runqtail && runnext=0那么当前p是空闲的
 	runqhead uint32
 	runqtail uint32
 	runq     [256]guintptr
@@ -658,6 +667,7 @@ type p struct {
 	// TODO: Consider caching this in the running G.
 	wbBuf wbBuf
 
+	// 是否需要运行safePointFn方法
 	runSafePointFn uint32 // if 1, run sched.safePointFn at next safe point
 
 	pad cpu.CacheLinePad
@@ -743,8 +753,11 @@ type schedt struct {
 	// 链表用 m.freelink 字段进行链接
 	freem *m
 
-	gcwaiting  uint32 // gc is waiting to run
-	stopwait   int32
+	// gc正等着执行
+	gcwaiting uint32 // gc is waiting to run
+	// 等待stop的p的数量
+	stopwait int32
+	// 当stopwait == 0 的时候 会调用notewakeup(note)  notewakeup含义待确认
 	stopnote   note
 	sysmonwait uint32
 	sysmonnote note

@@ -132,6 +132,7 @@ func semacreate(mp *m) {
 }
 
 //go:nosplit
+// 休眠函数
 func semasleep(ns int64) int32 {
 	_g_ := getg()
 

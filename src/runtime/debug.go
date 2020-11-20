@@ -25,12 +25,13 @@ func GOMAXPROCS(n int) int {
 	if n <= 0 || n == ret {
 		return ret
 	}
-
+	// 停止所有的活动
 	stopTheWorld("GOMAXPROCS")
 
 	// newprocs will be processed by startTheWorld
 	newprocs = int32(n)
 
+	// 重启活动
 	startTheWorld()
 	return ret
 }

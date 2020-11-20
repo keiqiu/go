@@ -135,6 +135,7 @@ func notewakeup(n *note) {
 	var v uintptr
 	for {
 		v = atomic.Loaduintptr(&n.key)
+		// 设置n.key = 1, 被唤醒的线程通过查看该值是否等于1来确定是被其它线程唤醒还是意外从睡眠中苏醒
 		if atomic.Casuintptr(&n.key, v, locked) {
 			break
 		}
@@ -160,6 +161,7 @@ func notesleep(n *note) {
 		throw("notesleep not on g0")
 	}
 	semacreate(gp.m)
+	// 将当前的n.key指向m
 	if !atomic.Casuintptr(&n.key, 0, uintptr(unsafe.Pointer(gp.m))) {
 		// Must be locked (got wakeup).
 		if n.key != locked {
@@ -169,7 +171,10 @@ func notesleep(n *note) {
 	}
 	// Queued. Sleep.
 	gp.m.blocked = true
+	// cgo
 	if *cgo_yield == nil {
+		// 超时时间设置为-1，表示无限期等待
+		// linux参见@os_openbsd.go
 		semasleep(-1)
 	} else {
 		// Sleep for an arbitrary-but-moderate interval to poll libc interceptors.

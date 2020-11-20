@@ -31,6 +31,7 @@ func getg() *g
 // This must NOT be go:noescape: if fn is a stack-allocated closure,
 // fn puts g on a run queue, and g executes before fn returns, the
 // closure will be invalidated while it is still executing.
+// 将m切换到g0上运行函数fn  linux64参见asm_amd64.s@runtime·mcall
 func mcall(fn func(*g))
 
 // systemstack runs fn on a system stack.
@@ -136,6 +137,8 @@ func noescape(p unsafe.Pointer) unsafe.Pointer {
 }
 
 func cgocallback(fn, frame unsafe.Pointer, framesize, ctxt uintptr)
+
+// 汇编实现 linux64参见asm_amd64.s@runtime·gogo
 func gogo(buf *gobuf)
 func gosave(buf *gobuf)
 
@@ -172,6 +175,7 @@ type neverCallThisFunction struct{}
 // gentraceback assumes that goexit terminates the stack. A direct
 // call on the stack will cause gentraceback to stop walking the stack
 // prematurely and if there is leftover state it may panic.
+// 汇编实现
 func goexit(neverCallThisFunction)
 
 // Not all cgocallback_gofunc frames are actually cgocallback_gofunc,

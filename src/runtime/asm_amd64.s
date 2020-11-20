@@ -279,9 +279,12 @@ TEXT runtime·gosave(SB), NOSPLIT, $0-8
 TEXT runtime·gogo(SB), NOSPLIT, $16-8
 	MOVQ	buf+0(FP), BX		// gobuf
 	MOVQ	gobuf_g(BX), DX
+	// 此时是把g放入到cx，可是这里为什么会确保g!=nil,有人说会引起crash，不明白为什么
 	MOVQ	0(DX), CX		// make sure g != nil
+	// tls宏 参见go_tls.h
 	get_tls(CX)
 	MOVQ	DX, g(CX)
+	// 将sp存入sp寄存器 即goexit函数
 	MOVQ	gobuf_sp(BX), SP	// restore SP
 	MOVQ	gobuf_ret(BX), AX
 	MOVQ	gobuf_ctxt(BX), DX
@@ -290,7 +293,12 @@ TEXT runtime·gogo(SB), NOSPLIT, $16-8
 	MOVQ	$0, gobuf_ret(BX)
 	MOVQ	$0, gobuf_ctxt(BX)
 	MOVQ	$0, gobuf_bp(BX)
+	// 将pc存入bx寄存器
 	MOVQ	gobuf_pc(BX), BX
+	// jmp到gobuf_pc所指的位置，执行func，当func执行完毕时，会将sp寄存器中的东西恢复到rip寄存器（pc寄存器）执行，即开始执行goexit
+	// 等价下方伪代码
+	// CALL gobuf_pc
+	// CALL gobuf_sp
 	JMP	BX
 
 // func mcall(fn func(*g))
@@ -411,6 +419,7 @@ bad:
 // the top of a stack (for example, morestack calling newstack
 // calling the scheduler calling newm calling gc), so we must
 // record an argument size. For that purpose, it has no arguments.
+// 函数会被编译器自动插入到函数序言
 TEXT runtime·morestack(SB),NOSPLIT,$0-0
 	// Cannot grow scheduler stack (m->g0).
 	get_tls(CX)
@@ -1362,7 +1371,7 @@ TEXT _cgo_topofstack(SB),NOSPLIT,$0
 // returns to goexit+PCQuantum.
 TEXT runtime·goexit(SB),NOSPLIT,$0-0
 	BYTE	$0x90	// NOP
-	CALL	runtime·goexit1(SB)	// does not return
+	CALL	runtime·goexit1(SB)	// does not return 参见proc.go@goexit1
 	// traceback from goexit1 must hit code range of goexit
 	BYTE	$0x90	// NOP
 

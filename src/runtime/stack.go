@@ -914,6 +914,7 @@ func round2(x int32) int32 {
 // compiler doesn't check this.
 //
 //go:nowritebarrierrec
+// 抢占的执行 调用该函数是汇编调用，在linux64中参见asm_amd64.s@runtime·morestack
 func newstack() {
 	thisg := getg()
 	// TODO: double check all gp. shouldn't be getg().
@@ -1068,6 +1069,7 @@ func nilfunc() {
 
 // adjust Gobuf as if it executed a call to fn
 // and then did an immediate gosave.
+// 将fv绑到到gobuf上，做一些调整，实际由gostartcall来完成
 func gostartcallfn(gobuf *gobuf, fv *funcval) {
 	var fn unsafe.Pointer
 	if fv != nil {
