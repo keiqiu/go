@@ -871,7 +871,7 @@ func (s *state) stmt(n *Node) {
 		}
 		s.call(n.Left, d)
 	case OGO:
-		s.call(n.Left, callGo)
+		s.call(n.Left, callGo) // 识别代码中的go关键字，调用s.call方法
 
 	case OAS2DOTTYPE:
 		res, resok := s.dottype(n.Rlist.First(), true)
@@ -3909,7 +3909,7 @@ func (s *state) call(n *Node, k callKind) *ssa.Value {
 		case k == callDefer:
 			call = s.newValue1A(ssa.OpStaticCall, types.TypeMem, deferproc, s.mem())
 		case k == callGo:
-			call = s.newValue1A(ssa.OpStaticCall, types.TypeMem, newproc, s.mem())
+			call = s.newValue1A(ssa.OpStaticCall, types.TypeMem, newproc, s.mem()) // 此处将go关键字转化为runtime.newproc
 		case closure != nil:
 			// rawLoad because loading the code pointer from a
 			// closure is always safe, but IsSanitizerSafeAddr
