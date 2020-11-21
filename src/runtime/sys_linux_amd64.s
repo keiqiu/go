@@ -539,7 +539,7 @@ TEXT runtime·futex(SB),NOSPLIT,$0
 // int32 clone(int32 flags, void *stk, M *mp, G *gp, void (*fn)(void));
 TEXT runtime·clone(SB),NOSPLIT,$0
 	MOVL	flags+0(FP), DI
-	MOVQ	stk+8(FP), SI
+	MOVQ	stk+8(FP), SI // 将第二个参数stk放到si寄存器
 	MOVQ	$0, DX
 	MOVQ	$0, R10
 
@@ -550,18 +550,22 @@ TEXT runtime·clone(SB),NOSPLIT,$0
 	MOVQ	fn+32(FP), R12
 
 	MOVL	$SYS_clone, AX
-	SYSCALL
+	SYSCALL                 // 这里执行了系统的clone函数，会产生两个线程
 
 	// In parent, return.
+	// 看着意思是执行sys_clone之后，会把线程id放到ax寄存器中
+	// 这里判断ax寄存器的值与0的关系，其结果会放修改几个寄存器的标志位  https://blog.csdn.net/feixiang3839/article/details/82666090
 	CMPQ	AX, $0
-	JEQ	3(PC)
-	MOVL	AX, ret+40(FP)
+	JEQ	3(PC) // 如果cmpq的值是相等的，则表示是在子线程，就跳转到下面的第三条指令
+	MOVL	AX, ret+40(FP) // 父线程中，直接返回了
 	RET
 
+    // 以下汇编只有在子线程中才会执行
 	// In child, on new stack.
-	MOVQ	SI, SP
+	MOVQ	SI, SP // 此时将stk参数放入sp寄存器，此时sp是mp.g0函数栈的栈顶
 
 	// If g or m are nil, skip Go-related setup.
+	// 这里检测m和m.g0是不是nil，如果是跳到nog
 	CMPQ	R8, $0    // m
 	JEQ	nog
 	CMPQ	R9, $0    // g
@@ -570,9 +574,11 @@ TEXT runtime·clone(SB),NOSPLIT,$0
 	// Initialize m->procid to Linux tid
 	MOVL	$SYS_gettid, AX
 	SYSCALL
+	// 获取线程id，设置到m.procid上
 	MOVQ	AX, m_procid(R8)
 
 	// Set FS to point at m->tls.
+	// 设置线程空间
 	LEAQ	m_tls(R8), DI
 	CALL	runtime·settls(SB)
 
@@ -584,6 +590,7 @@ TEXT runtime·clone(SB),NOSPLIT,$0
 
 nog:
 	// Call fn
+	// 执行fn函数 也就是mstart，进入调度函数，永不退出
 	CALL	R12
 
 	// It shouldn't return. If it does, exit that thread.

@@ -488,6 +488,7 @@ type m struct {
 	divmod  uint32 // div/mod denominator for arm - known to liblink
 
 	// Fields not known to debuggers.
+	// 线程id 这个是在汇编中设置的 参见sys_linux_amd64.s@runtime·clone
 	procid     uint64       // for debuggers, but offset not hard-coded
 	gsignal    *g           // signal-handling g
 	goSigStack gsignalStack // Go-allocated signal handling stack
