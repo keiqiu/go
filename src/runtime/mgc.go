@@ -157,6 +157,7 @@ const (
 // GOGC==0, this will set heapminimum to 0, resulting in constant
 // collection even when the heap size is small, which is useful for
 // debugging.
+// 触发gc的最小堆大小，但堆大小满足这个后会触发gc
 var heapminimum uint64 = defaultHeapMinimum
 
 // defaultHeapMinimum is the value of heapminimum for GOGC==100.
@@ -165,30 +166,36 @@ const defaultHeapMinimum = 4 << 20
 // Initialized from $GOGC.  GOGC=off means no GC.
 var gcpercent int32
 
+// gc初始化， 启动的时候m0.g0执行
 func gcinit() {
 	if unsafe.Sizeof(workbuf{}) != _WorkbufSize {
 		throw("size of Workbuf is suboptimal")
 	}
 
 	// No sweep on the first cycle.
+	// 第一个周期不扫描
 	mheap_.sweepdone = 1
 
 	// Set a reasonable initial GC trigger.
+	// 设置gc的触发条件的增长比率
 	memstats.triggerRatio = 7 / 8.0
 
 	// Fake a heap_marked value so it looks like a trigger at
 	// heapminimum is the appropriate growth from heap_marked.
 	// This will go into computing the initial GC goal.
+	// 看起来像是一个触发gc的条件
 	memstats.heap_marked = uint64(float64(heapminimum) / (1 + memstats.triggerRatio))
 
 	// Set gcpercent from the environment. This will also compute
 	// and set the GC trigger and goal.
+	// 设置gc的百分比
 	_ = setGCPercent(readgogc())
 
 	work.startSema = 1
 	work.markDoneSema = 1
 }
 
+// 从环境变量读取gogc的配置，如果为off则代表没有gc，如果配置200 则代表翻倍，默认是100
 func readgogc() int32 {
 	p := gogetenv("GOGC")
 	if p == "off" {
@@ -217,6 +224,7 @@ func gcenable() {
 //go:linkname setGCPercent runtime/debug.setGCPercent
 func setGCPercent(in int32) (out int32) {
 	// Run on the system stack since we grab the heap lock.
+	// 由于要锁mheap，所以需要在系统栈上运行
 	systemstack(func() {
 		lock(&mheap_.lock)
 		out = gcpercent
@@ -224,6 +232,7 @@ func setGCPercent(in int32) (out int32) {
 			in = -1
 		}
 		gcpercent = in
+		// 重置heapminimum
 		heapminimum = defaultHeapMinimum * uint64(gcpercent) / 100
 		// Update pacing in response to gcpercent change.
 		gcSetTriggerRatio(memstats.triggerRatio)
