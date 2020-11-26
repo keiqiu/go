@@ -4270,7 +4270,7 @@ func procresize(nprocs int32) *p {
 	}
 
 	// 如果当前的M已经绑定P并且不在要销毁的p中，继续使用，否则将当前的M绑定一个P
-	// 初始化时只有m0 和 g0，没有p，这是创建了p，然后将m0绑定到一个p上
+	// 初始化时只有m0 和 g0，没有p，这是创建了p，然后将m0绑定到p[0]上
 	_g_ := getg()
 	if _g_.m.p != 0 && _g_.m.p.ptr().id < nprocs {
 		// continue to use the current P
