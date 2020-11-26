@@ -4138,12 +4138,14 @@ func (pp *p) init(id int32) {
 	}
 	pp.wbBuf.reset()
 	if pp.mcache == nil {
+		// 如果是第一个p，那他有m0，直接关联上m0的mcache
 		if id == 0 {
 			if getg().m.mcache == nil {
 				throw("missing mcache?")
 			}
 			pp.mcache = getg().m.mcache // bootstrap
 		} else {
+			// 初始化一个mcache空间给p
 			pp.mcache = allocmcache()
 		}
 	}
@@ -4262,6 +4264,7 @@ func procresize(nprocs int32) *p {
 		if pp == nil {
 			pp = new(p)
 		}
+		// 初始化p
 		pp.init(i)
 		atomicstorep(unsafe.Pointer(&allp[i]), unsafe.Pointer(pp))
 	}
@@ -4371,6 +4374,7 @@ func acquirep(_p_ *p) {
 //
 //go:nowritebarrierrec
 //go:nosplit
+// 将m和p绑定
 func wirep(_p_ *p) {
 	_g_ := getg()
 
@@ -4385,6 +4389,7 @@ func wirep(_p_ *p) {
 		print("wirep: p->m=", _p_.m, "(", id, ") p->status=", _p_.status, "\n")
 		throw("wirep: invalid p state")
 	}
+	// 将m的mcache指向p
 	_g_.m.mcache = _p_.mcache
 	_g_.m.p.set(_p_)
 	_p_.m.set(_g_.m)

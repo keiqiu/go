@@ -546,7 +546,7 @@ type m struct {
 	// 用户维护allm， allm是一个单向的m链表
 	alllink   *m // on allm
 	schedlink muintptr
-	// 当前m的内存缓存
+	// 当前m的内存结构，小对象直接从mcache分配，m0的mcache是在初始化中分配，其他的m的mcache直接指向p的mcache
 	mcache        *mcache
 	lockedg       guintptr
 	createstack   [32]uintptr // stack that created this thread.
@@ -598,6 +598,7 @@ type p struct {
 	mcache      *mcache
 	raceprocctx uintptr
 
+	// defer的池子
 	deferpool    [5][]*_defer // pool of available defer structs of different sizes (see panic.go)
 	deferpoolbuf [5][32]*_defer
 
