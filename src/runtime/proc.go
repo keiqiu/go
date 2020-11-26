@@ -570,6 +570,8 @@ func schedinit() {
 	tracebackinit()
 	moduledataverify()
 	stackinit()
+
+	// 初始化内存
 	mallocinit()
 	// 初始化m
 	mcommoninit(_g_.m)

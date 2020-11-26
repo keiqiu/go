@@ -594,7 +594,7 @@ type p struct {
 	sysmontick sysmontick // last tick observed by sysmon
 	// 当前关联的m，如果为nil说明处于idle状态
 	m muintptr // back-link to associated m (nil if idle)
-	// 本地cache
+	// 当前p的内存分配的小空间
 	mcache      *mcache
 	raceprocctx uintptr
 
