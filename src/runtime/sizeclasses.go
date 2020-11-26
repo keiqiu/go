@@ -71,6 +71,7 @@ package runtime
 //    65      28672       57344        2           0      4.91%
 //    66      32768       32768        1           0     12.50%
 
+// 定义了多种内存大小
 const (
 	_MaxSmallSize   = 32768
 	smallSizeDiv    = 8
