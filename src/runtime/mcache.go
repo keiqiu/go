@@ -16,11 +16,14 @@ import (
 // must be specially handled.
 //
 //go:notinheap
+// mcache是与proc绑定的小的对象内存管理器，他不需要加锁操作，因为每个p有且仅有一个，因此不存在并发
 type mcache struct {
 	// The following members are accessed on every malloc,
 	// so they are grouped here for better caching.
+	// 分配这么多字节后触发堆样本
 	next_sample uintptr // trigger heap sample after allocating this many bytes
-	local_scan  uintptr // bytes of scannable heap allocated
+	// 分配的可扫描堆的字节数
+	local_scan uintptr // bytes of scannable heap allocated
 
 	// Allocator cache for tiny objects w/o pointers.
 	// See "Tiny allocator" comment in malloc.go.
@@ -31,12 +34,19 @@ type mcache struct {
 	// tiny is a heap pointer. Since mcache is in non-GC'd memory,
 	// we handle it by clearing it in releaseAll during mark
 	// termination.
+	// 没有指针的微小对象的分配器缓存。
+	// 请参考 malloc.go 中的 "小型分配器" 注释。
+	//
+	// tiny 指向当前 tiny 块的起始位置，或当没有 tiny 块时候为 nil
+	// tiny 是一个堆指针。由于 mcache 在非 GC 内存中，我们通过在
+	// mark termination 期间在 releaseAll 中清除它来处理它。
 	tiny             uintptr
 	tinyoffset       uintptr
 	local_tinyallocs uintptr // number of tiny allocs not counted in other stats
 
 	// The rest is not accessed on every malloc.
 
+	// 用来分配的 spans，由 spanClass 索引
 	alloc [numSpanClasses]*mspan // spans to allocate from, indexed by spanClass
 
 	stackcache [_NumStackOrders]stackfreelist
@@ -80,26 +90,33 @@ type stackfreelist struct {
 }
 
 // dummy mspan that contains no free objects.
+// 一个标识符，标识改span是个空的
 var emptymspan mspan
 
 func allocmcache() *mcache {
 	var c *mcache
+	// 进入系统栈，通过向分配器要一个块空间
 	systemstack(func() {
 		lock(&mheap_.lock)
 		c = (*mcache)(mheap_.cachealloc.alloc())
 		c.flushGen = mheap_.sweepgen
 		unlock(&mheap_.lock)
 	})
+	// 初始化alloc，都引用到一个空的对象上
 	for i := range c.alloc {
 		c.alloc[i] = &emptymspan
 	}
+
 	c.next_sample = nextSample()
 	return c
 }
 
+// 销毁mcache，当p销毁的时候才调用
 func freemcache(c *mcache) {
 	systemstack(func() {
+		// 释放所有的span
 		c.releaseAll()
+		// 释放stack
 		stackcache_clear(c)
 
 		// NOTE(rsc,rlh): If gcworkbuffree comes back, we need to coordinate
@@ -109,6 +126,7 @@ func freemcache(c *mcache) {
 
 		lock(&mheap_.lock)
 		purgecachedstats(c)
+		// 归还空间
 		mheap_.cachealloc.free(unsafe.Pointer(c))
 		unlock(&mheap_.lock)
 	})
@@ -119,6 +137,9 @@ func freemcache(c *mcache) {
 //
 // Must run in a non-preemptible context since otherwise the owner of
 // c could change.
+// 重新获取一个含有一个空闲对象的span，把它作为给定规格的缓存span，
+// 如果没有空闲的 span 了，那么从 mcentral 中获取一个。
+// 最后返回这个 span。
 func (c *mcache) refill(spc spanClass) {
 	// Return the current cached span to the central lists.
 	s := c.alloc[spc]
@@ -126,6 +147,8 @@ func (c *mcache) refill(spc spanClass) {
 	if uintptr(s.allocCount) != s.nelems {
 		throw("refill of span with free space remaining")
 	}
+
+	// 如果s不是空的span
 	if s != &emptymspan {
 		// Mark this span as no longer cached.
 		if s.sweepgen != mheap_.sweepgen+3 {
@@ -135,6 +158,7 @@ func (c *mcache) refill(spc spanClass) {
 	}
 
 	// Get a new cached span from the central lists.
+	// 从 central 获取相应规格的 span
 	s = mheap_.central[spc].mcentral.cacheSpan()
 	if s == nil {
 		throw("out of memory")
@@ -151,6 +175,7 @@ func (c *mcache) refill(spc spanClass) {
 	c.alloc[spc] = s
 }
 
+// 释放所有
 func (c *mcache) releaseAll() {
 	for i := range c.alloc {
 		s := c.alloc[i]
