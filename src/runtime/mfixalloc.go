@@ -32,6 +32,10 @@ import "unsafe"
 //
 // 调用方负责锁定 fixalloc 调用。调用方可以在对象中保持状态，
 // 但当释放和重新分配时第一个字会被破坏。
+
+// fixalloc 是一个基于自由列表的固定大小的分配器。其核心原理是将若干未分配的内存块连接起来， 将未分配的区域的第一个字为指向下一个未分配区域的指针使用。
+//
+// Go 的主分配堆中 malloc（span、cache、treap、finalizer、profile、arena hint 等） 均 围绕它为实体进行固定分配和回收。
 type fixalloc struct {
 	// 分配的内存大小
 	size uintptr
