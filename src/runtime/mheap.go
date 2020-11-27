@@ -18,6 +18,7 @@ import (
 // minPhysPageSize is a lower-bound on the physical page size. The
 // true physical page size may be larger than this. In contrast,
 // sys.PhysPageSize is an upper-bound on the physical page size.
+// 物理页大小的下线， sys.PhysPageSize是物理页大小的上线
 const minPhysPageSize = 4096
 
 // Main malloc heap.
@@ -28,10 +29,14 @@ const minPhysPageSize = 4096
 // which must not be heap-allocated.
 //
 //go:notinheap
+// 堆管理器
 type mheap struct {
 	// lock must only be acquired on the system stack, otherwise a g
 	// could self-deadlock if its stack grows with the lock held.
-	lock      mutex
+	// 调用必须在系统栈上，并且加以保护，会有一个全局的mheap_，存在并发访问
+	lock mutex
+
+	// 空闲的spans，结构还没看
 	free      mTreap // free spans
 	sweepgen  uint32 // sweep generation, see comment in mspan
 	sweepdone uint32 // all spans are swept
@@ -48,6 +53,7 @@ type mheap struct {
 	// store. Accesses during STW might not hold the lock, but
 	// must ensure that allocation cannot happen around the
 	// access (since that may free the backing store).
+	// 所有的span
 	allspans []*mspan // all spans out there
 
 	// sweepSpans contains two mspan stacks: one of swept in-use
@@ -59,8 +65,10 @@ type mheap struct {
 	// unswept stack and pushes spans that are still in-use on the
 	// swept stack. Likewise, allocating an in-use span pushes it
 	// on the swept stack.
+	// 包含两个mspan的stacks，一个是扫过的，一个是没扫过的
 	sweepSpans [2]gcSweepBuf
 
+	// 对齐字段
 	_ uint32 // align uint64 fields on 32-bit for atomics
 
 	// Proportional sweep
@@ -199,11 +207,20 @@ type mheap struct {
 	// spaced CacheLinePadSize bytes apart, so that each mcentral.lock
 	// gets its own cache line.
 	// central is indexed by spanClass.
+	// 小规格类型的空闲列表。填充确保MCentrals的CacheLineSize字节间隔开，以便每个MCentral.lock获得自己的缓存行。
+	// central由spanClass索引。
+	//
+	// todo 这里为什么要申请134个呢？
+	// heap里其实是维护了134个central，这134个central对应了 mcache 中的 alloc 数组，也就是每一个spanClass就有一个central。
+	// 所以，在mcache中申请内存时，如果在某个 spanClass 的内存链表上找不到空闲内存，那么 mcache 就会向对应的 spanClass 的central获取一批内存块。
+	// 注意，这里central数组的定义里面使用填充字节，这是因为多线程会并发访问不同central避免false sharing。
 	central [numSpanClasses]struct {
 		mcentral mcentral
-		pad      [cpu.CacheLinePadSize - unsafe.Sizeof(mcentral{})%cpu.CacheLinePadSize]byte
+		// pad是填充字节，确保对齐，这里对齐的目的是确保mcentral在加锁的时候，只影响到自己的缓存行，避免影响其他的
+		pad [cpu.CacheLinePadSize - unsafe.Sizeof(mcentral{})%cpu.CacheLinePadSize]byte
 	}
 
+	// span、mcache、treapNodes、specialfinalizer、specialprofile、arenaHints的分配器，mheap初始化的时候会调用分配器的初始化函数
 	spanalloc             fixalloc // allocator for span*
 	cachealloc            fixalloc // allocator for mcache*
 	treapalloc            fixalloc // allocator for treapNodes*
@@ -225,10 +242,12 @@ var mheap_ mheap
 // fields.
 //
 //go:notinheap
+// headArena维护所有的地址空间
 type heapArena struct {
 	// bitmap stores the pointer/scalar bitmap for the words in
 	// this arena. See mbitmap.go for a description. Use the
 	// heapBits type to access this.
+	// 一个位图  2M
 	bitmap [heapArenaBitmapBytes]byte
 
 	// spans maps from virtual address page ID within this arena to *mspan.
@@ -242,6 +261,7 @@ type heapArena struct {
 	// known to contain in-use or stack spans. This means there
 	// must not be a safe-point between establishing that an
 	// address is live and looking it up in the spans array.
+	// 4k span
 	spans [pagesPerArena]*mspan
 
 	// pageInUse is a bitmap that indicates which spans are in
@@ -250,6 +270,7 @@ type heapArena struct {
 	// span is used.
 	//
 	// Writes are protected by mheap_.lock.
+	// 1k page
 	pageInUse [pagesPerArena / 8]uint8
 
 	// pageMarks is a bitmap that indicates which spans have any
@@ -265,6 +286,7 @@ type heapArena struct {
 	// TODO(austin): It would be nice if this was uint64 for
 	// faster scanning, but we don't have 64-bit atomic bit
 	// operations.
+	// 1k pagemarks
 	pageMarks [pagesPerArena / 8]uint8
 }
 
@@ -272,6 +294,7 @@ type heapArena struct {
 // mheap_.arenaHints.
 //
 //go:notinheap
+// 扩展的情况
 type arenaHint struct {
 	addr uintptr
 	down bool
@@ -326,20 +349,26 @@ var mSpanStateNames = []string{
 // mSpanList heads a linked list of spans.
 //
 //go:notinheap
+// span的双向链表
 type mSpanList struct {
 	first *mspan // first span in list, or nil if none
 	last  *mspan // last span in list, or nil if none
 }
 
 //go:notinheap
+// 内存的span
 type mspan struct {
+	// span是一个双向链表
 	next *mspan     // next span in list, or nil if none
 	prev *mspan     // previous span in list, or nil if none
 	list *mSpanList // For debugging. TODO: Remove.
 
+	// span的第一个地址的位置
 	startAddr uintptr // address of first byte of span aka s.base()
-	npages    uintptr // number of pages in span
+	// 页数
+	npages uintptr // number of pages in span
 
+	// 空闲的spans的链表
 	manualFreeList gclinkptr // list of free objects in mSpanManual spans
 
 	// freeindex is the slot index between 0 and nelems at which to begin scanning
@@ -357,9 +386,18 @@ type mspan struct {
 	// undefined and should never be referenced.
 	//
 	// Object n starts at address n*elemsize + (start << pageShift).
+	// freeindex 在0-nelems之间，代表了查找空闲对象的起点。
+	// 每次分配都会从freeindex开始扫描allocBits直到它为0(allocBits的第x位)，意味着这里是(x)空闲对象
+	// freeindex 调节以使以后的扫描从新发现的freeobject开始。
+	// 如果freeindex==nelem 说明没有空闲对象了
+	// allocBits是对象的bitmap
+	// 如果n>=freeindex而且allocBits[n/8]&(1<<(n%8))为0，(即allocBits的第n位为0)
+	// 否则，n是已经分配的。nelem后的Bits未定义的，不应该被引用
+	// object n 的起使内存是 n*elemsize+(start<<pageShift)  (span起使内存+对象偏移)
 	freeindex uintptr
 	// TODO: Look up nelems from sizeclass and remove this field if it
 	// helps performance.
+	// span中的对象个数
 	nelems uintptr // number of object in the span.
 
 	// Cache of the allocBits at freeindex. allocCache is shifted
@@ -403,10 +441,12 @@ type mspan struct {
 	// if sweepgen == h->sweepgen + 3, the span was swept and then cached and is still cached
 	// h->sweepgen is incremented by 2 after every GC
 
-	sweepgen    uint32
-	divMul      uint16     // for divide by elemsize - divMagic.mul
-	baseMask    uint16     // if non-0, elemsize is a power of 2, & this will get object allocation base
-	allocCount  uint16     // number of allocated objects
+	sweepgen uint32
+	divMul   uint16 // for divide by elemsize - divMagic.mul
+	baseMask uint16 // if non-0, elemsize is a power of 2, & this will get object allocation base
+	// 分配对象的数量
+	allocCount uint16 // number of allocated objects
+	// 对象的大小
 	spanclass   spanClass  // size class and noscan (uint8)
 	state       mSpanState // mspaninuse etc
 	needzero    uint8      // needs to be zeroed before allocation
@@ -819,6 +859,7 @@ func pageIndexOf(p uintptr) (arena *heapArena, pageIdx uintptr, pageMask uint8) 
 }
 
 // Initialize the heap.
+// 初始化堆
 func (h *mheap) init() {
 	h.treapalloc.init(unsafe.Sizeof(treapNode{}), nil, nil, &memstats.other_sys)
 	h.spanalloc.init(unsafe.Sizeof(mspan{}), recordspan, unsafe.Pointer(h), &memstats.mspan_sys)
@@ -834,10 +875,12 @@ func (h *mheap) init() {
 	// from improperly cas'ing it from 0.
 	//
 	// This is safe because mspan contains no heap pointers.
+	// 不允许mspan分配为0
 	h.spanalloc.zero = false
 
 	// h->mapcache needs no init
 
+	// 初始化每一个mcentral
 	for i := range h.central {
 		h.central[i].mcentral.init(spanClass(i))
 	}
@@ -1572,6 +1615,7 @@ func (span *mspan) inList() bool {
 }
 
 // Initialize an empty doubly-linked list.
+// 初始化一个空的双向链表
 func (list *mSpanList) init() {
 	list.first = nil
 	list.last = nil

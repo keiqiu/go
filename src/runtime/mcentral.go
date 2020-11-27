@@ -17,21 +17,27 @@ import "runtime/internal/atomic"
 // Central list of free objects of a given size.
 //
 //go:notinheap
+// 维护一个给定大小的对象锁对应的size
 type mcentral struct {
+	// 锁
 	lock      mutex
-	spanclass spanClass
-	nonempty  mSpanList // list of spans with a free object, ie a nonempty free list
-	empty     mSpanList // list of spans with no free objects (or cached in an mcache)
+	spanclass spanClass // 当前的class size
+	// 非空的span列表
+	nonempty mSpanList // list of spans with a free object, ie a nonempty free list
+	// 空闲的span列表
+	empty mSpanList // list of spans with no free objects (or cached in an mcache)
 
 	// nmalloc is the cumulative count of objects allocated from
 	// this mcentral, assuming all spans in mcaches are
 	// fully-allocated. Written atomically, read under STW.
+	// 从该对象的分类的计数器
 	nmalloc uint64
 }
 
 // Initialize a single central free list.
 func (c *mcentral) init(spc spanClass) {
-	c.spanclass = spc
+	c.spanclass = spc // 设置size
+	// 初始化noempty和empty，此时链表为空
 	c.nonempty.init()
 	c.empty.init()
 }

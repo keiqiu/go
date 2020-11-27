@@ -76,6 +76,8 @@ func badsystemstack() {
 //
 // The (CPU-specific) implementations of this function are in memclr_*.s.
 //go:noescape
+// amd64参见memclr_adm64.s@runtime·memclrNoHeapPointers
+// 从ptr开始，清理N字节
 func memclrNoHeapPointers(ptr unsafe.Pointer, n uintptr)
 
 //go:linkname reflect_memclrNoHeapPointers reflect.memclrNoHeapPointers
@@ -86,6 +88,7 @@ func reflect_memclrNoHeapPointers(ptr unsafe.Pointer, n uintptr) {
 // memmove copies n bytes from "from" to "to".
 // in memmove_*.s
 //go:noescape
+// 从from地址拷贝nbytes到to
 func memmove(to, from unsafe.Pointer, n uintptr)
 
 //go:linkname reflect_memmove reflect.memmove

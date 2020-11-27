@@ -458,6 +458,7 @@ func releasem(mp *m) {
 }
 
 //go:nosplit
+// 获取当前g关联m的mcache
 func gomcache() *mcache {
 	return getg().m.mcache
 }

@@ -295,6 +295,7 @@ const (
 )
 
 // defer size class for arg size sz
+// 给定参数格式，计算defer对象的大小
 //go:nosplit
 func deferclass(siz uintptr) uintptr {
 	if siz <= minDeferArgs {

@@ -17,6 +17,7 @@ const (
 // Don't split the stack as this method may be invoked without a valid G, which
 // prevents us from allocating more stack.
 //go:nosplit
+//  从操作系统获取一大块已清零的内存
 func sysAlloc(n uintptr, sysStat *uint64) unsafe.Pointer {
 	p, err := mmap(nil, n, _PROT_READ|_PROT_WRITE, _MAP_ANON|_MAP_PRIVATE, -1, 0)
 	if err != 0 {
@@ -36,6 +37,7 @@ func sysAlloc(n uintptr, sysStat *uint64) unsafe.Pointer {
 
 var adviseUnused = uint32(_MADV_FREE)
 
+//  通知操作系统内存区域的内容已经没用了，可以移作它用。
 func sysUnused(v unsafe.Pointer, n uintptr) {
 	// By default, Linux's "transparent huge page" support will
 	// merge pages into a huge page if there's even a single
@@ -62,6 +64,22 @@ func sysUnused(v unsafe.Pointer, n uintptr) {
 	// gets most of the benefit of huge pages while keeping the
 	// number of VMAs under control. With hugePageSize = 2MB, even
 	// a pessimal heap can reach 128GB before running out of VMAs.
+	// 默认情况下，Linux 的透明大页支持会将 pages 合并到大页
+	// 即使是只有一个单独的普通页也如此，会把我们 DONTNEED 的效果也消除掉。
+	// 在 amd64 平台上，khugepaged 会将一个 4KB 的单页变成 2MB，从而将
+	// 进程的 RSS 爆炸式地增长 512 倍。 (See issue #8832 and Linux kernel bug
+	// https://bugzilla.kernel.org/show_bug.cgi?id=93111)
+	//
+	// 为了规避这个问题，我们在释放堆上页时，会显式地禁用透明大页。
+	// 不过还是需要非常小心，因为修改这个 flag 会倾向于将包含 v 的 VMA(memory mapping)
+	// 分割为三块 VMAs，以能够跟踪不同内存区域中 MADV_NOHUGEPAGE 的不同的值。
+	// 每个内存地址都有一个 65530 的默认 VMAs 的限制(sysctl vm.max_map_count)，
+	// 所以我们必须小心不要创建过多的 VMAs(see issue #12233).
+	//
+	// 因为大页很大，所以以较细的粒度调整 MADV_NOHUGEPAGE 收效甚微，我们通过较大粒度对
+	// MADV_NOHUGEPAGE 进行调整，避免了 VMAs 的爆炸增长。只要控制好 VMA 的数量，这样
+	// 做也可以利用好大页的优势。设置 hugePageSize = 2MB 的情况下，即使是最坏情况下的堆
+	// 也可以在用完 VMAs 之前达到 128GB
 	if physHugePageSize != 0 {
 		// If it's a large allocation, we want to leave huge
 		// pages enabled. Hence, we only adjust the huge page
@@ -116,6 +134,7 @@ func sysUnused(v unsafe.Pointer, n uintptr) {
 	}
 }
 
+// 通知操作系统内存区域的内容又需要用了
 func sysUsed(v unsafe.Pointer, n uintptr) {
 	// Partially undo the NOHUGEPAGE marks from sysUnused
 	// for whole huge pages between v and v+n. This may
@@ -144,6 +163,7 @@ func sysHugePage(v unsafe.Pointer, n uintptr) {
 // Don't split the stack as this function may be invoked without a valid G,
 // which prevents us from allocating more stack.
 //go:nosplit
+// 无条件返回内存；只有当分配内存途中发生了 out-of-memory 错误时才会使用。如果 sysFree 本身啥也没干成(no-op)也是 ok 的。
 func sysFree(v unsafe.Pointer, n uintptr, sysStat *uint64) {
 	mSysStatDec(sysStat, n)
 	munmap(v, n)
@@ -153,6 +173,7 @@ func sysFault(v unsafe.Pointer, n uintptr) {
 	mmap(v, n, _PROT_NONE, _MAP_ANON|_MAP_PRIVATE|_MAP_FIXED, -1, 0)
 }
 
+// 会在不分配内存的情况下，保留一段地址空
 func sysReserve(v unsafe.Pointer, n uintptr) unsafe.Pointer {
 	p, err := mmap(v, n, _PROT_NONE, _MAP_ANON|_MAP_PRIVATE, -1, 0)
 	if err != 0 {
@@ -161,6 +182,7 @@ func sysReserve(v unsafe.Pointer, n uintptr) unsafe.Pointer {
 	return p
 }
 
+// 将之前保留的地址空间映射好以进行使用
 func sysMap(v unsafe.Pointer, n uintptr, sysStat *uint64) {
 	mSysStatInc(sysStat, n)
 

@@ -119,7 +119,7 @@ const (
 	maxSmallSize  = _MaxSmallSize
 
 	pageShift = _PageShift
-	pageSize  = _PageSize
+	pageSize  = _PageSize // 8k
 	pageMask  = _PageMask
 	// By construction, single page spans of the smallest object class
 	// have the most objects per span.
@@ -243,7 +243,7 @@ const (
 	// This is particularly important with the race detector,
 	// since it significantly amplifies the cost of committed
 	// memory.
-	heapArenaBytes = 1 << logHeapArenaBytes
+	heapArenaBytes = 1 << logHeapArenaBytes // 64M
 
 	// logHeapArenaBytes is log_2 of heapArenaBytes. For clarity,
 	// prefer using heapArenaBytes where possible (we need the
@@ -251,9 +251,9 @@ const (
 	logHeapArenaBytes = (6+20)*(_64bit*(1-sys.GoosWindows)*(1-sys.GoosAix)*(1-sys.GoarchWasm)) + (2+20)*(_64bit*sys.GoosWindows) + (2+20)*(1-_64bit) + (8+20)*sys.GoosAix + (2+20)*sys.GoarchWasm
 
 	// heapArenaBitmapBytes is the size of each heap arena's bitmap.
-	heapArenaBitmapBytes = heapArenaBytes / (sys.PtrSize * 8 / 2)
+	heapArenaBitmapBytes = heapArenaBytes / (sys.PtrSize * 8 / 2) // 2097152=2M
 
-	pagesPerArena = heapArenaBytes / pageSize
+	pagesPerArena = heapArenaBytes / pageSize // 8192
 
 	// arenaL1Bits is the number of bits of the arena number
 	// covered by the first level arena map.
@@ -322,6 +322,7 @@ const (
 //
 // This must be set by the OS init code (typically in osinit) before
 // mallocinit.
+// 操作系统的物理页大小，以字节为单位
 var physPageSize uintptr
 
 // physHugePageSize is the size in bytes of the OS's default physical huge
@@ -410,6 +411,31 @@ var (
 // marks a region such that it will always fault if accessed. Used only for
 // debugging the runtime.
 
+// 注释摘至 https://github.com/cch123/golang-notes/blob/master/memory.md
+// sysAlloc 从操作系统获取一大块已清零的内存，一般是 100 KB 或 1MB
+// NOTE: sysAlloc 返回 OS 对齐的内存，但是对于堆分配器来说可能需要以更大的单位进行对齐。
+// 因此 caller 需要小心地将 sysAlloc 获取到的内存重新进行对齐。
+//
+// sysUnused 通知操作系统内存区域的内容已经没用了，可以移作它用。
+// sysUsed 通知操作系统内存区域的内容又需要用了。
+//
+// sysFree 无条件返回内存；只有当分配内存途中发生了 out-of-memory 错误
+// 时才会使用。如果 sysFree 本身啥也没干成(no-op)也是 ok 的。
+//
+// sysReserve 会在不分配内存的情况下，保留一段地址空间。
+// 如果传给它的指针是非 nil，意思是 caller 想保留这段地址，
+// 但这种情况下，如果该段地址不可用时，sysReserve 依然可以选择另外的地址。
+// 在一些操作系统的某些 case 下，sysReserve 化合简单地检查这段地址空间是否可用
+// 同时并不会真地保留它。sysReserve 返回非空指针时，如果地址空间保留成功了
+// 会将 *reserved 设置为 true，只是检查而未保留的话会设置为 false。
+// NOTE: sysReserve 返回 系统对齐的内存，没有按堆分配器的更大对齐单位进行对齐，
+// 所以 caller 需要将通过 sysAlloc 获取到的内存进行重对齐。
+//
+// sysMap 将之前保留的地址空间映射好以进行使用。
+// 如果地址空间确实被保留的话，reserved 参数会为 true。只 check 的话是 false。
+//
+// sysFault 当一块内存已经被 sysAlloc 时，标记其为 fault。只在 debug runtime 的时候用用。
+
 func mallocinit() {
 	if class_to_size[_TinySizeClass] != _TinySize {
 		throw("bad TinySizeClass")
@@ -417,6 +443,7 @@ func mallocinit() {
 
 	testdefersizes()
 
+	// heapArenaBitmapBytes只有1位为1 其余bit位为0，我本地测试的heapArenaBitmapBytes为2097152=2M
 	if heapArenaBitmapBytes&(heapArenaBitmapBytes-1) != 0 {
 		// heapBits expects modular arithmetic on bitmap
 		// addresses to work.
@@ -454,11 +481,16 @@ func mallocinit() {
 	}
 
 	// Initialize the heap.
+	// 初始化堆
 	mheap_.init()
+	// 获取当前g, 此时是g0，获取的也是m0， m0的mcache是在初始化的时候分配
 	_g_ := getg()
+
+	// 初始化g0.m0.mcache
 	_g_.m.mcache = allocmcache()
 
 	// Create initial arena growth hints.
+	// 如果系统指针是8字节，64位系统，创建初始的 arena 增长 hint
 	if sys.PtrSize == 8 {
 		// On a 64-bit machine, we pick the following hints
 		// because:
@@ -810,6 +842,7 @@ retry:
 }
 
 // base address for all 0-byte allocations
+// 当申请的一个0byte的时候，直接返回zerobase
 var zerobase uintptr
 
 // nextFreeFast returns the next free object if one is quickly available.
@@ -874,6 +907,7 @@ func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bo
 // Allocate an object of size bytes.
 // Small objects are allocated from the per-P cache's free lists.
 // Large objects (> 32 kB) are allocated straight from the heap.
+// 分配一个指定大小的对象
 func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	if gcphase == _GCmarktermination {
 		throw("mallocgc called with gcphase == _GCmarktermination")
@@ -908,6 +942,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 
 	// assistG is the G to charge for this allocation, or nil if
 	// GC is not currently active.
+	// 当前的g，如果gc当前不是活跃状态，则g==nil
 	var assistG *g
 	if gcBlackenEnabled != 0 {
 		// Charge the current user G for this allocation.
@@ -928,6 +963,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	}
 
 	// Set mp.mallocing to keep from being preempted by GC.
+	// 当前m禁止抢占
 	mp := acquirem()
 	if mp.mallocing != 0 {
 		throw("malloc deadlock")
@@ -942,7 +978,11 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	c := gomcache()
 	var x unsafe.Pointer
 	noscan := typ == nil || typ.ptrdata == 0
+
+	// 如果不是大的对象  size<32K
 	if size <= maxSmallSize {
+		// 如果是一个微小对象 size<16
+		// string.go@rawbyteslice就有这种微小对象
 		if noscan && size < maxTinySize {
 			// Tiny allocator.
 			//
@@ -1007,7 +1047,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 				c.tinyoffset = size
 			}
 			size = maxTinySize
-		} else {
+		} else { // 小对象
 			var sizeclass uint8
 			if size <= smallSizeMax-8 {
 				sizeclass = size_to_class8[(size+smallSizeDiv-1)/smallSizeDiv]
@@ -1026,7 +1066,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 				memclrNoHeapPointers(unsafe.Pointer(v), size)
 			}
 		}
-	} else {
+	} else { //大对象
 		var s *mspan
 		shouldhelpgc = true
 		systemstack(func() {
@@ -1147,6 +1187,7 @@ func largeAlloc(size uintptr, needzero bool, noscan bool) *mspan {
 // implementation of new builtin
 // compiler (both frontend and SSA backend) knows the signature
 // of this function
+// 所有堆的内存分配都通过此函数
 func newobject(typ *_type) unsafe.Pointer {
 	return mallocgc(typ.size, typ, true)
 }
@@ -1190,6 +1231,7 @@ func profilealloc(mp *m, x unsafe.Pointer, size uintptr) {
 // processes, the distance between two samples follows the exponential
 // distribution (exp(MemProfileRate)), so the best return value is a random
 // number taken from an exponential distribution whose mean is MemProfileRate.
+// 返回下一个堆分析的采样点，是服从泊松过程的随机数
 func nextSample() uintptr {
 	if GOOS == "plan9" {
 		// Plan 9 doesn't support floating point in note handler.
