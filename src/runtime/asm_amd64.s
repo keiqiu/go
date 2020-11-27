@@ -305,6 +305,9 @@ TEXT runtime·gogo(SB), NOSPLIT, $16-8
 // Switch to m->g0's stack, call fn(g).
 // Fn must never return. It should gogo(&g->sched)
 // to keep running g.
+// mcall是切换到g0执行fn，并且将g作为参数传递给fn
+// fn函数永远不能反回，否者出错，在函数中如果想切换到g，执行gogo函数
+// mcall的函数最后都会进入调度中，这个函数是实现协程循环调度的重要函数，通过这里的实现，避免的循环执行函数创建的调用栈
 TEXT runtime·mcall(SB), NOSPLIT, $0-8
 	MOVQ	fn+0(FP), DI
 
