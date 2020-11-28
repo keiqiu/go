@@ -454,6 +454,7 @@ type mspan struct {
 	divShift2   uint8      // for divide by elemsize - divMagic.shift2
 	scavenged   bool       // whether this span has had its pages released to the OS
 	elemsize    uintptr    // computed from sizeclass or from npages
+	// 使用的内存的=limit - startAddr
 	limit       uintptr    // end of data in span
 	speciallock mutex      // guards specials list
 	specials    *special   // linked list of special records sorted by offset.
@@ -1046,7 +1047,9 @@ func (h *mheap) reclaimChunk(arenas []arenaIdx, pageIdx, n uintptr) uintptr {
 // any stack growth during alloc_m would self-deadlock.
 //
 //go:systemstack
+// 分配堆内存的实际函数，此函数需要在系统栈上运行
 func (h *mheap) alloc_m(npage uintptr, spanclass spanClass, large bool) *mspan {
+	// 获取g
 	_g_ := getg()
 
 	// To prevent excessive heap growth, before allocating n pages
@@ -1127,6 +1130,7 @@ func (h *mheap) alloc_m(npage uintptr, spanclass spanClass, large bool) *mspan {
 // size class and scannability.
 //
 // If needzero is true, the memory for the returned span will be zeroed.
+// 从堆上分配npage页内存
 func (h *mheap) alloc(npage uintptr, spanclass spanClass, large bool, needzero bool) *mspan {
 	// Don't do any operations that lock the heap on the G stack.
 	// It might trigger stack growth, and the stack growth code needs
@@ -1137,9 +1141,11 @@ func (h *mheap) alloc(npage uintptr, spanclass spanClass, large bool, needzero b
 	})
 
 	if s != nil {
+		// 需要清零时，对分配的 span 进行清零
 		if needzero && s.needzero != 0 {
 			memclrNoHeapPointers(unsafe.Pointer(s.base()), s.npages<<_PageShift)
 		}
+		// 标记下 无需清0
 		s.needzero = 0
 	}
 	return s

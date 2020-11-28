@@ -1070,6 +1070,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 		var s *mspan
 		shouldhelpgc = true
 		systemstack(func() {
+			// 分配一个大对象
 			s = largeAlloc(size, needzero, noscan)
 		})
 		s.freeindex = 1
@@ -1159,14 +1160,19 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	return x
 }
 
+// 大对象的分配，size是大小，needzero是否清零  noscan是gc相关的，暂时不知道
 func largeAlloc(size uintptr, needzero bool, noscan bool) *mspan {
 	// print("largeAlloc size=", size, "\n")
 
+	// 溢出了
 	if size+_PageSize < size {
 		throw("out of memory")
 	}
+
+	// 根据size计算需要分配的页数
 	npages := size >> _PageShift
 	if size&_PageMask != 0 {
+		// size不能整除pageshift，所以移位操作会丢弃一部分，此时需要+1
 		npages++
 	}
 
@@ -1175,6 +1181,7 @@ func largeAlloc(size uintptr, needzero bool, noscan bool) *mspan {
 	// pays the debt down to npage pages.
 	deductSweepCredit(npages*_PageSize, npages)
 
+	// 从堆上分配
 	s := mheap_.alloc(npages, makeSpanClass(0, noscan), true, needzero)
 	if s == nil {
 		throw("out of memory")
