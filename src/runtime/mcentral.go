@@ -45,6 +45,7 @@ func (c *mcentral) init(spc spanClass) {
 // Allocate a span to use in an mcache.
 func (c *mcentral) cacheSpan() *mspan {
 	// Deduct credit for this span allocation and sweep if necessary.
+	// 根据spanclass 计算需要申请多少byte内存空间
 	spanBytes := uintptr(class_to_allocnpages[c.spanclass.sizeclass()]) * _PageSize
 	deductSweepCredit(spanBytes, 0)
 
@@ -56,6 +57,7 @@ func (c *mcentral) cacheSpan() *mspan {
 	sg := mheap_.sweepgen
 retry:
 	var s *mspan
+	// 从nonempty队列中找
 	for s = c.nonempty.first; s != nil; s = s.next {
 		if s.sweepgen == sg-2 && atomic.Cas(&s.sweepgen, sg-2, sg-1) {
 			c.nonempty.remove(s)
@@ -74,7 +76,7 @@ retry:
 		unlock(&c.lock)
 		goto havespan
 	}
-
+	// 从非空里面找
 	for s = c.empty.first; s != nil; s = s.next {
 		if s.sweepgen == sg-2 && atomic.Cas(&s.sweepgen, sg-2, sg-1) {
 			// we have an empty span that requires sweeping,
@@ -109,6 +111,7 @@ retry:
 	unlock(&c.lock)
 
 	// Replenish central list if empty.
+	// nonempty 和 empty列表中都没有了，需要扩充一下
 	s = c.grow()
 	if s == nil {
 		return nil
@@ -119,6 +122,7 @@ retry:
 
 	// At this point s is a non-empty span, queued at the end of the empty list,
 	// c is unlocked.
+	// 找到了span
 havespan:
 	if trace.enabled && !traceDone {
 		traceGCSweepDone()
@@ -254,10 +258,12 @@ func (c *mcentral) freeSpan(s *mspan, preserve bool, wasempty bool) bool {
 }
 
 // grow allocates a new empty span from the heap and initializes it for c's size class.
+// 从堆中分配一个新的span，并将其初始化为c的size类
 func (c *mcentral) grow() *mspan {
 	npages := uintptr(class_to_allocnpages[c.spanclass.sizeclass()])
 	size := uintptr(class_to_size[c.spanclass.sizeclass()])
 
+	// 想mheap请求一个包含npages页，其类型为spanclass
 	s := mheap_.alloc(npages, c.spanclass, false, true)
 	if s == nil {
 		return nil
@@ -265,8 +271,10 @@ func (c *mcentral) grow() *mspan {
 
 	// Use division by multiplication and shifts to quickly compute:
 	// n := (npages << _PageShift) / size
+	// 计算最大的最想数，即npages*pagesize/size
 	n := (npages << _PageShift) >> s.divShift * uintptr(s.divMul) >> s.divShift2
 	s.limit = s.base() + size*n
+	// 做一下bitmap上的标记
 	heapBitsForAddr(s.base()).initSpan(s)
 	return s
 }

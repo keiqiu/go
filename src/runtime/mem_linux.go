@@ -17,7 +17,7 @@ const (
 // Don't split the stack as this method may be invoked without a valid G, which
 // prevents us from allocating more stack.
 //go:nosplit
-//  从操作系统获取一大块已清零的内存
+//  调用mmap函数从操作系统获取一大块已清零的内存
 func sysAlloc(n uintptr, sysStat *uint64) unsafe.Pointer {
 	p, err := mmap(nil, n, _PROT_READ|_PROT_WRITE, _MAP_ANON|_MAP_PRIVATE, -1, 0)
 	if err != 0 {

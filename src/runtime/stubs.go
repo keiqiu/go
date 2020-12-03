@@ -298,6 +298,7 @@ func call1073741824(typ, fn, arg unsafe.Pointer, n, retoffset uint32)
 func systemstack_switch()
 
 // round n up to a multiple of a.  a must be a power of 2.
+// 将n舍入为a的倍数。 a必须是2的幂, 找到一个最小大于n数r，是的r%a=0
 func round(n, a uintptr) uintptr {
 	return (n + a - 1) &^ (a - 1)
 }

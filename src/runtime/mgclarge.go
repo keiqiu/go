@@ -39,6 +39,7 @@ import (
 )
 
 //go:notinheap
+// 内存的树堆
 type mTreap struct {
 	treap           *treapNode
 	unscavHugePages uintptr // number of unscavenged huge pages in the treap
@@ -528,6 +529,7 @@ func (root *mTreap) removeNode(t *treapNode) {
 // reached immediately at the root, since neither the left subtree nor
 // the right subtree will have a sufficient maxPages, whilst the root
 // node is also unable to satisfy it.
+// 从树堆中找一个mspan s，是的s.npages>=npages
 func (root *mTreap) find(npages uintptr) treapIter {
 	t := root.treap
 	for t != nil {

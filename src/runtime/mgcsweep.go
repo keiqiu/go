@@ -296,6 +296,7 @@ func (s *mspan) sweep(preserve bool) bool {
 		mbits := s.markBitsForBase()
 		abits := s.allocBitsForIndex(0)
 		for i := uintptr(0); i < s.nelems; i++ {
+			// 如果gcbits没有标记 &&  ( 当前abits.index小于 s.fressindex || abits是被标记的)
 			if !mbits.isMarked() && (abits.index < s.freeindex || abits.isMarked()) {
 				x := s.base() + i*s.elemsize
 				if debug.allocfreetrace != 0 {

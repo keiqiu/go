@@ -192,9 +192,11 @@ func (s *mspan) refillAllocCache(whichByte uintptr) {
 // or after s.freeindex.
 // There are hardware instructions that can be used to make this
 // faster if profiling warrants it.
+// 在freeindex之后找到下一个可以用的对象的index
 func (s *mspan) nextFreeIndex() uintptr {
 	sfreeindex := s.freeindex
 	snelems := s.nelems
+	// 指向了最后一个元素
 	if sfreeindex == snelems {
 		return sfreeindex
 	}
@@ -207,6 +209,7 @@ func (s *mspan) nextFreeIndex() uintptr {
 	bitIndex := sys.Ctz64(aCache)
 	for bitIndex == 64 {
 		// Move index to start of next cached bits.
+		// 取sfreeindex + 64 的第64高位
 		sfreeindex = (sfreeindex + 64) &^ (64 - 1)
 		if sfreeindex >= snelems {
 			s.freeindex = snelems
@@ -279,6 +282,7 @@ func (s *mspan) markBitsForBase() markBits {
 }
 
 // isMarked reports whether mark bit m is set.
+// 返回当前位是否被标记，标记返回true， 没标记返回0
 func (m markBits) isMarked() bool {
 	return *m.bytep&m.mask != 0
 }
@@ -330,8 +334,10 @@ func (m *markBits) advance() {
 //
 // nosplit because it is used during write barriers and must not be preempted.
 //go:nosplit
+// bitmap上记录分配的span
 func heapBitsForAddr(addr uintptr) (h heapBits) {
 	// 2 bits per word, 4 pairs per byte, and a mask is hard coded.
+	// 计算所在的arena
 	arena := arenaIndex(addr)
 	ha := mheap_.arenas[arena.l1()][arena.l2()]
 	// The compiler uses a load for nil checking ha, but in this
@@ -780,6 +786,7 @@ func typeBitsBulkBarrier(typ *_type, dst, src, size uintptr) {
 // If this is a span of pointer-sized objects, it initializes all
 // words to pointer/scan.
 // Otherwise, it initializes all words to scalar/dead.
+// 做一下bitmap上的标记
 func (h heapBits) initSpan(s *mspan) {
 	size, n, total := s.layout()
 

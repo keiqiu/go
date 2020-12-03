@@ -243,6 +243,8 @@ const (
 	// This is particularly important with the race detector,
 	// since it significantly amplifies the cost of committed
 	// memory.
+	// 当前版本的AMD64架构就规定了只用48位地址；一个表示虚拟内存地址的64位指针只有低48位有效并带符号扩展到64位——换句话说，其高16位必须是全1或全0，而且必须与低48位的最高位（第47位）一致，否则通过该地址访问内存会产生#GP异常（general-protection exception）。
+
 	heapArenaBytes = 1 << logHeapArenaBytes // 64M
 
 	// logHeapArenaBytes is log_2 of heapArenaBytes. For clarity,
@@ -524,6 +526,9 @@ func mallocinit() {
 		// On darwin/arm64, the address space is even smaller.
 		// On AIX, mmaps starts at 0x0A00000000000000 for 64-bit.
 		// processes.
+		// 当前版本的AMD64架构就规定了只用48位地址；一个表示虚拟内存地址的64位指针只有低48位有效并带符号扩展到64位——换句话说，其高16位必须是全1或全0，而且必须与低48位的最高位（第47位）一致，否则通过该地址访问内存会产生#GP异常（general-protection exception）
+		// 因此此处的循环从0X7f开始，这样高16位为0， 低48位的高位也为0，真的处处都是学问呀
+		// 将00C000000000 ~ 7FC000000000作为保留地址挂到mheap_.arenaHints上
 		for i := 0x7f; i >= 0; i-- {
 			var p uintptr
 			switch {
@@ -632,10 +637,14 @@ func mallocinit() {
 // be transitioned to Ready before use.
 //
 // h must be locked.
+//
+// 申请至少n byte的内存， 通常是64M的整数倍
 func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
+	// n向64M取整
 	n = round(n, heapArenaBytes)
 
 	// First, try the arena pre-reservation.
+	// 从 arena 中 获取对应大小的内存， 获取不到返回nil， 在64位系统上一直返回nil
 	v = h.arena.alloc(n, heapArenaBytes, &memstats.heap_sys)
 	if v != nil {
 		size = n
@@ -643,21 +652,30 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 	}
 
 	// Try to grow the heap at a hint address.
+	// 从arena获取到需要的内存，跳转到 mapped操作
 	for h.arenaHints != nil {
 		hint := h.arenaHints
+		// 当前arena的虚拟地址的起始地址
 		p := hint.addr
+		// 如果是最后一个
 		if hint.down {
 			p -= n
 		}
+
 		if p+n < p {
+			// 溢出了 或者hint.down=true，不能向下扩展，因此不能使用
 			// We can't use this, so don't ask.
 			v = nil
-		} else if arenaIndex(p+n-1) >= 1<<arenaBits {
+		} else if arenaIndex(p+n-1) >= 1<<arenaBits { // 溢出区域到高位了， 也不能分配了  linux中arenaBits为22
+			// 22bit是4M 4M*heapArenaBytes（64M） = 256TB 就是用了256T的空间
+			// 已经超出了head的寻址空间了
 			// Outside addressable heap. Can't use.
 			v = nil
 		} else {
+			// 从当前位置p，保留一段长度为n的内存，如果申请成功返回了指针 v不一定等于p
 			v = sysReserve(unsafe.Pointer(p), n)
 		}
+		// 如果申请的位置跟p是一个位置，申请成功，修改当前hint的起始地址
 		if p == uintptr(v) {
 			// Success. Update the hint.
 			if !hint.down {
@@ -674,12 +692,16 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 		// particular, this is already how Windows behaves, so
 		// it would simplify things there.
 		if v != nil {
+			// 由于申请v和我要的p位置不相同，还回去
 			sysFree(v, n, nil)
 		}
+		// 换到下一个增长空间
 		h.arenaHints = hint.next
+		// 上一个hint已经分配完了，释放掉
 		h.arenaHintAlloc.free(unsafe.Pointer(hint))
 	}
 
+	// 如果遍历了所有的arenaHints，还没有找到
 	if size == 0 {
 		if raceenabled {
 			// The race detector assumes the heap lives in
@@ -692,12 +714,15 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 		// All of the hints failed, so we'll take any
 		// (sufficiently aligned) address the kernel will give
 		// us.
+		// 所有的hints都没有了，直接向内核要吧，申请一个64MB的空间
 		v, size = sysReserveAligned(nil, n, heapArenaBytes)
+		// 如果还申请不到，申请失败
 		if v == nil {
 			return nil, 0
 		}
 
 		// Create new hints for extending this region.
+		// 创建一个新的对象，挂在arenaHints上，并且标识其为最后一个
 		hint := (*arenaHint)(h.arenaHintAlloc.alloc())
 		hint.addr, hint.down = uintptr(v), true
 		hint.next, mheap_.arenaHints = mheap_.arenaHints, hint
@@ -707,6 +732,7 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 	}
 
 	// Check for bad pointers or pointers we can't use.
+	// 检查返回的指针是不是有问题
 	{
 		var bad string
 		p := uintptr(v)
@@ -730,13 +756,18 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 	}
 
 	// Transition from Reserved to Prepared.
+	// 将内存标记为可以使用了
 	sysMap(v, size, &memstats.heap_sys)
 
 mapped:
 	// Create arena metadata.
-	for ri := arenaIndex(uintptr(v)); ri <= arenaIndex(uintptr(v)+size-1); ri++ {
+	// 创建一个arena
+	// 根据 v 的address，计算出 arenas 的L1 L2， 申请了多少个arean就添加几个，通常为1个
+	for ri := arenaIndex(uintptr(v)); ri <= arenaIndex(uintptr(v)+size-1); ri++ { // amd64下l1=0
 		l2 := h.arenas[ri.l1()]
 		if l2 == nil {
+			// 初始化l2的arena map 等价于golang中的h.arenas[ri.l1()] = [1 << arenaL2Bits]*heapArena
+			// 为什么没有这么做呢？
 			// Allocate an L2 arena map.
 			l2 = (*[1 << arenaL2Bits]*heapArena)(persistentalloc(unsafe.Sizeof(*l2), sys.PtrSize, nil))
 			if l2 == nil {
@@ -750,6 +781,7 @@ mapped:
 		}
 		var r *heapArena
 		r = (*heapArena)(h.heapArenaAlloc.alloc(unsafe.Sizeof(*r), sys.PtrSize, &memstats.gc_sys))
+		// 在64位系统上，没有heapArenaAlloc的分配器
 		if r == nil {
 			r = (*heapArena)(persistentalloc(unsafe.Sizeof(*r), sys.PtrSize, &memstats.gc_sys))
 			if r == nil {
@@ -758,9 +790,13 @@ mapped:
 		}
 
 		// Add the arena to the arenas list.
+		// 将创建的arena添加到arenas list中
+		// 如果当前allArenas满了，双倍扩容
 		if len(h.allArenas) == cap(h.allArenas) {
+			// 翻倍
 			size := 2 * uintptr(cap(h.allArenas)) * sys.PtrSize
 			if size == 0 {
+				// 如果是第一次 创建个物理页大小
 				size = physPageSize
 			}
 			newArray := (*notInHeap)(persistentalloc(size, sys.PtrSize, &memstats.gc_sys))
@@ -775,6 +811,7 @@ mapped:
 			// double the array each time, this can lead
 			// to at most 2x waste.
 		}
+		// 将ri添加到allArenas的末尾
 		h.allArenas = h.allArenas[:len(h.allArenas)+1]
 		h.allArenas[len(h.allArenas)-1] = ri
 
@@ -796,6 +833,7 @@ mapped:
 // sysReserveAligned is like sysReserve, but the returned pointer is
 // aligned to align bytes. It may reserve either n or n+align bytes,
 // so it returns the size that was reserved.
+// 保留一段对齐后的地址，返回地址和内存的大小
 func sysReserveAligned(v unsafe.Pointer, size, align uintptr) (unsafe.Pointer, uintptr) {
 	// Since the alignment is rather large in uses of this
 	// function, we're not likely to get it by chance, so we ask
@@ -847,7 +885,10 @@ var zerobase uintptr
 
 // nextFreeFast returns the next free object if one is quickly available.
 // Otherwise it returns 0.
+// 返回下一个可用的空地址空间，如果没找到返回0
 func nextFreeFast(s *mspan) gclinkptr {
+	// 第几位开始不是0,最开始macahe中的span都为emptyspan，初始化时allocCache为0，所以返回的是64个
+	// 调用nextFree后会或者一个新的span，初始化时allocache= ^uint64(0)，此时theBit从0开始
 	theBit := sys.Ctz64(s.allocCache) // Is there a free object in the allocCache?
 	if theBit < 64 {
 		result := s.freeindex + uintptr(theBit)
@@ -874,20 +915,25 @@ func nextFreeFast(s *mspan) gclinkptr {
 //
 // Must run in a non-preemptible context since otherwise the owner of
 // c could change.
+//
 func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bool) {
+	// 选择span
 	s = c.alloc[spc]
 	shouldhelpgc = false
 	freeIndex := s.nextFreeIndex()
+	// span 满了 或者span是个emptySpan
 	if freeIndex == s.nelems {
 		// The span is full.
 		if uintptr(s.allocCount) != s.nelems {
 			println("runtime: s.allocCount=", s.allocCount, "s.nelems=", s.nelems)
 			throw("s.allocCount != s.nelems && freeIndex == s.nelems")
 		}
+		// 重新获取一个spc类型的span
 		c.refill(spc)
 		shouldhelpgc = true
 		s = c.alloc[spc]
 
+		// 再找一次下一个元素
 		freeIndex = s.nextFreeIndex()
 	}
 
@@ -896,6 +942,7 @@ func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bo
 	}
 
 	v = gclinkptr(freeIndex*s.elemsize + s.base())
+	// 分配次数+1
 	s.allocCount++
 	if uintptr(s.allocCount) > s.nelems {
 		println("s.allocCount=", s.allocCount, "s.nelems=", s.nelems)
@@ -977,11 +1024,12 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	dataSize := size
 	c := gomcache()
 	var x unsafe.Pointer
+	// typ==nil || 没有指针 则对用不用扫描
 	noscan := typ == nil || typ.ptrdata == 0
 
 	// 如果不是大的对象  size<32K
 	if size <= maxSmallSize {
-		// 如果是一个微小对象 size<16
+		// 如果是一个微小对象 size<16 并且不是指针
 		// string.go@rawbyteslice就有这种微小对象
 		if noscan && size < maxTinySize {
 			// Tiny allocator.
@@ -1013,8 +1061,11 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			// standalone escaping variables. On a json benchmark
 			// the allocator reduces number of allocations by ~12% and
 			// reduces heap size by ~20%.
+			// 如果mcache是第一次使用，tinyoffset为0
 			off := c.tinyoffset
+			// 进行对齐
 			// Align tiny pointer for required (conservative) alignment.
+			// 判断对齐位数，是8位还是4位还是2位
 			if size&7 == 0 {
 				off = round(off, 8)
 			} else if size&3 == 0 {
@@ -1022,18 +1073,28 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			} else if size&1 == 0 {
 				off = round(off, 2)
 			}
+
+			// 如果偏移地址和申请的size  < 16 并且 c.tiny已经分配过了
 			if off+size <= maxTinySize && c.tiny != 0 {
 				// The object fits into existing tiny block.
+				// 那就是说现在申请的这个对象适合这个微小对象，那么当前申请的位置就行c.tiny+off
 				x = unsafe.Pointer(c.tiny + off)
+				// tinyoffset添加一个地址
 				c.tinyoffset = off + size
+				// 本地的微小对象分配次数加1
 				c.local_tinyallocs++
 				mp.mallocing = 0
 				releasem(mp)
 				return x
 			}
 			// Allocate a new maxTinySize block.
+			// 找到maxTinySize对应的块， tinySpanClass=5
+			// class_to_size中对应16字节的index是3，由于微小对象肯定没有指针，而没有指针的结构按1、3、5序列排列，因此16字节对应index=5
 			span := c.alloc[tinySpanClass]
+
+			// 从当前的span获取
 			v := nextFreeFast(span)
+			// 当前span没有，如果快速获取失败，则通过普通获取
 			if v == 0 {
 				v, _, shouldhelpgc = c.nextFree(tinySpanClass)
 			}
@@ -1116,6 +1177,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	// All slots hold nil so no scanning is needed.
 	// This may be racing with GC so do it atomically if there can be
 	// a race marking the bit.
+	// 如果当前gc的状态不是gcoff，则新增的变量标记为黑色
 	if gcphase != _GCoff {
 		gcmarknewobject(uintptr(x), size, scanSize)
 	}
@@ -1427,6 +1489,7 @@ func (l *linearAlloc) init(base, size uintptr) {
 
 func (l *linearAlloc) alloc(size, align uintptr, sysStat *uint64) unsafe.Pointer {
 	p := round(l.next, align)
+	// 由于linearAlloc仅在32位系统上初始化，在64位系统上next、mapped、end都是0， 因此p=align  p + size > l.end会一直为true
 	if p+size > l.end {
 		return nil
 	}

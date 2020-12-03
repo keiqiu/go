@@ -37,16 +37,19 @@ type mcache struct {
 	// 没有指针的微小对象的分配器缓存。
 	// 请参考 malloc.go 中的 "小型分配器" 注释。
 	//
-	// tiny 指向当前 tiny 块的起始位置，或当没有 tiny 块时候为 nil
+	// tiny 指向当前 微小内存块的起始位置，或当没有 tiny 块时候为 nil
 	// tiny 是一个堆指针。由于 mcache 在非 GC 内存中，我们通过在
 	// mark termination 期间在 releaseAll 中清除它来处理它。
-	tiny             uintptr
-	tinyoffset       uintptr
+	tiny uintptr
+	// 微小对象的偏移量，可以容纳多个对象，
+	tinyoffset uintptr
+	// 微小对象的分配次数
 	local_tinyallocs uintptr // number of tiny allocs not counted in other stats
 
 	// The rest is not accessed on every malloc.
 
 	// 用来分配的 spans，由 spanClass 索引
+	// 这里为什么要申请134个呢， 此处分为含指针和不包含指针的情况，其中不包含指针的67的index为1 3 5 7 等
 	alloc [numSpanClasses]*mspan // spans to allocate from, indexed by spanClass
 
 	stackcache [_NumStackOrders]stackfreelist
@@ -90,7 +93,7 @@ type stackfreelist struct {
 }
 
 // dummy mspan that contains no free objects.
-// 一个标识符，标识改span是个空的
+// 一个标识符，标识该span是个空的
 var emptymspan mspan
 
 func allocmcache() *mcache {
@@ -148,7 +151,7 @@ func (c *mcache) refill(spc spanClass) {
 		throw("refill of span with free space remaining")
 	}
 
-	// 如果s不是空的span
+	// 如果s不是空的span，一开始所有的span都是空的
 	if s != &emptymspan {
 		// Mark this span as no longer cached.
 		if s.sweepgen != mheap_.sweepgen+3 {

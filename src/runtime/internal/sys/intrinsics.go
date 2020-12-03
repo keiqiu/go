@@ -32,6 +32,7 @@ var deBruijnIdx32 = [32]byte{
 
 // Ctz64 counts trailing (low-order) zeroes,
 // and if all are zero, then 64.
+// 检查尾部连续为0的个数
 func Ctz64(x uint64) int {
 	x &= -x                      // isolate low-order bit
 	y := x * deBruijn64 >> 58    // extract part of deBruijn sequence
