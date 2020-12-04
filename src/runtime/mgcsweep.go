@@ -399,6 +399,7 @@ func (s *mspan) sweep(preserve bool) bool {
 	if !res {
 		// The span has been swept and is still in-use, so put
 		// it on the swept in-use list.
+		// 将span加入待扫描的队列中
 		mheap_.sweepSpans[sweepgen/2%2].push(s)
 	}
 	return res

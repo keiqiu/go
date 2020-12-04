@@ -68,6 +68,9 @@ type mheap struct {
 	// swept stack. Likewise, allocating an in-use span pushes it
 	// on the swept stack.
 	// 包含两个mspan的stacks，一个是扫过的，一个是没扫过的
+	// 扫过的span位于 sweepSpans[sweepgen/2%2] 而没扫过的位于sweepSpans[1-sweepgen/2%2]
+	// 通过上面的机制，每次gc之后，下次含义互换
+	// 当sweepgen = 2， sweepSpans[0]表示待扫描的， sweepSpans[1] 表示扫描过， 下一次gc时 sweepgen = 4， 此时sweepSpans[0] 表示扫描过 ， sweepSpans[1]表示待扫描的
 	sweepSpans [2]gcSweepBuf
 
 	// 对齐字段
@@ -1118,6 +1121,7 @@ func (h *mheap) alloc_m(npage uintptr, spanclass spanClass, large bool) *mspan {
 		// Record span info, because gc needs to be
 		// able to map interior pointer to containing span.
 		atomic.Store(&s.sweepgen, h.sweepgen)
+		// 将span加入到扫描过的队列中
 		h.sweepSpans[h.sweepgen/2%2].push(s) // Add to swept in-use list.
 		s.state = mSpanInUse
 		s.allocCount = 0
