@@ -112,7 +112,10 @@ func sweepone() uintptr {
 	var s *mspan
 	sg := mheap_.sweepgen
 	for {
+		// 取出待处理的span
 		s = mheap_.sweepSpans[1-sg/2%2].pop()
+
+		// 没有待扫描的span，sweepdone置位扫描过了
 		if s == nil {
 			atomic.Store(&mheap_.sweepdone, 1)
 			break
