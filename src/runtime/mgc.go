@@ -1152,36 +1152,46 @@ const (
 // it is an exit condition for the _GCoff phase.
 type gcTrigger struct {
 	kind gcTriggerKind
-	now  int64  // gcTriggerTime: current time
-	n    uint32 // gcTriggerCycle: cycle number to start
+	// 当kind=gcTriggerTime，now取当前时间
+	now int64 // gcTriggerTime: current time
+	// 当kind=gcTriggerCycle，需要赋值n， 当前是第几次gc
+	n uint32 // gcTriggerCycle: cycle number to start
 }
 
 type gcTriggerKind int
 
+// 触发gc的类型
 const (
 	// gcTriggerHeap indicates that a cycle should be started when
 	// the heap size reaches the trigger heap size computed by the
 	// controller.
+	// 当内存堆区的大小达到某个阈值之后，触发gc
 	gcTriggerHeap gcTriggerKind = iota
 
 	// gcTriggerTime indicates that a cycle should be started when
 	// it's been more than forcegcperiod nanoseconds since the
 	// previous GC cycle.
+	// 当距上一次gc的时间已经超过forcegcperiod 纳秒后，开启gc
 	gcTriggerTime
 
 	// gcTriggerCycle indicates that a cycle should be started if
 	// we have not yet started cycle number gcTrigger.n (relative
 	// to work.cycles).
+	// 手动要求启用一次gc，通过runtime.GC函数时会产生此类型的gc
 	gcTriggerCycle
 )
 
 // test reports whether the trigger condition is satisfied, meaning
 // that the exit condition for the _GCoff phase has been met. The exit
 // condition should be tested when allocating.
+// 判断是否满足gc的条件
 func (t gcTrigger) test() bool {
+	// 当前未开启gc || panik的什么？ || gc状态不是关闭， 只要一个为真 就不开启
 	if !memstats.enablegc || panicking != 0 || gcphase != _GCoff {
 		return false
 	}
+
+	// 根据kind  判断条件是否满足gc
 	switch t.kind {
 	case gcTriggerHeap:
 		// Non-atomic access to heap_live for performance. If
@@ -1208,6 +1218,10 @@ func (t gcTrigger) test() bool {
 //
 // This may return without performing this transition in some cases,
 // such as when called on a system stack or with locks held.
+// 以下几个路径会调用gc
+// runtime.init->runtime.forcegchelper
+// runtime.mallocgc
+// runtime.GC
 func gcStart(trigger gcTrigger) {
 	// Since this is called from malloc and malloc is called in
 	// the guts of a number of libraries that might be holding
@@ -1239,6 +1253,7 @@ func gcStart(trigger gcTrigger) {
 	// transition.
 	semacquire(&work.startSema)
 	// Re-check transition condition under transition lock.
+	// 再次check，是否需要清理
 	if !trigger.test() {
 		semrelease(&work.startSema)
 		return
@@ -2109,6 +2124,7 @@ func gcSweep(mode gcMode) {
 
 	lock(&mheap_.lock)
 	mheap_.sweepgen += 2
+	// 允许sweep
 	mheap_.sweepdone = 0
 	if mheap_.sweepSpans[mheap_.sweepgen/2%2].index != 0 {
 		// We should have drained this list during the last

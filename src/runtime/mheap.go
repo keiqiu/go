@@ -37,10 +37,12 @@ type mheap struct {
 	lock mutex
 
 	// 空闲的spans的树堆
-	free      mTreap // free spans
-	sweepgen  uint32 // sweep generation, see comment in mspan
+	free     mTreap // free spans
+	sweepgen uint32 // sweep generation, see comment in mspan
+	// 所有的span已经扫过了
 	sweepdone uint32 // all spans are swept
-	sweepers  uint32 // number of active sweepone calls
+	// 当前正在执行sweepone的次数
+	sweepers uint32 // number of active sweepone calls
 
 	// allspans is a slice of all mspans ever created. Each mspan
 	// appears exactly once.
@@ -467,6 +469,12 @@ type mspan struct {
 	// if sweepgen == h->sweepgen + 1, the span was cached before sweep began and is still cached, and needs sweeping
 	// if sweepgen == h->sweepgen + 3, the span was swept and then cached and is still cached
 	// h->sweepgen is incremented by 2 after every GC
+	// 如果当前span.sweepgen == mheap.sweepgen - 2 那么说明当前span需要扫描清理
+	// 如果当前span.sweepgen == mheap.sweepgen - 1 那么说明当前span正在清理
+	// 如果当前span.sweepgen == mheap.sweepgen  那么说明当前span扫面完成，正准备使用
+	// 如果当前span.sweepgen == mheap.sweepgen + 1  那么说明当前span有cache，需要扫描清理
+	// 如果当前span.sweepgen == mheap.sweepgen + 3  那么说明当前span扫面完成，仍然有缓存
+	// h.sweepgen 每个gc后都会自增2
 	// 扫描计数值，用户与mheap的sweepgen比较，根据差值确定该span的扫描状态
 	sweepgen uint32
 	// todo 感觉是位操作上的一些magic number 全都用在bitmap上

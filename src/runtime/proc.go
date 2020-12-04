@@ -242,6 +242,7 @@ func os_beforeExit() {
 }
 
 // start forcegc helper goroutine
+// 启动的时候，启动gcStart
 func init() {
 	go forcegchelper()
 }

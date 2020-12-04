@@ -92,6 +92,7 @@ func bgsweep(c chan int) {
 
 // sweepone sweeps some unswept heap span and returns the number of pages returned
 // to the heap, or ^uintptr(0) if there was nothing to sweep.
+// sweepone清除一些未清除的堆范围，并返回返回到堆的页数，如果没有要清除的内容，则返回^ uintptr（0）
 func sweepone() uintptr {
 	_g_ := getg()
 	sweepRatio := mheap_.sweepPagesPerByte // For debugging
@@ -99,10 +100,12 @@ func sweepone() uintptr {
 	// increment locks to ensure that the goroutine is not preempted
 	// in the middle of sweep thus leaving the span in an inconsistent state for next GC
 	_g_.m.locks++
+	// 如果sweepdone是已完成的状态  直接返回
 	if atomic.Load(&mheap_.sweepdone) != 0 {
 		_g_.m.locks--
 		return ^uintptr(0)
 	}
+	// sweepers++
 	atomic.Xadd(&mheap_.sweepers, +1)
 
 	// Find a span to sweep.
