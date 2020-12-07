@@ -141,6 +141,7 @@ var oneptrmask = [...]uint8{1}
 // nowritebarrier is only advisory here.
 //
 //go:nowritebarrier
+// gcStart->gcBgMarkStartWorkers->gcBgMarkWorker->gcDrain->markroot
 func markroot(gcw *gcWork, i uint32) {
 	// TODO(austin): This is a bit ridiculous. Compute and store
 	// the bases in gcMarkRootPrepare instead of the counts.
