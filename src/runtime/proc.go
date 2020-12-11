@@ -2625,6 +2625,14 @@ func schedinitschedule() {
 		throw("schedule: in cgo")
 	}
 
+	// 获取g的优先级如下
+	// 1、gc的协程
+	// 2、每调度61次，从全局队列中获取一个协程
+	// 3、获取p的下一个优先任务（p.runnext）
+	// 4、获取p的本地任务（p.runq）
+	// 5、从全局的rung中获取
+	// 6、从被网络阻塞的g中获取
+	// 7、从其他p那里偷
 top:
 	// 如果当前GC需要停止整个世界（STW), 则调用gcstopm休眠当前的M
 	if sched.gcwaiting != 0 {
