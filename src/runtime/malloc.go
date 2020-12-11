@@ -991,8 +991,10 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	// GC is not currently active.
 	// 当前的g，如果gc当前不是活跃状态，则g==nil
 	var assistG *g
+	// 如果写屏障开启
 	if gcBlackenEnabled != 0 {
 		// Charge the current user G for this allocation.
+		// 让出资源
 		assistG = getg()
 		if assistG.m.curg != nil {
 			assistG = assistG.m.curg
@@ -1005,6 +1007,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			// This G is in debt. Assist the GC to correct
 			// this before allocating. This must happen
 			// before disabling preemption.
+			// 参与回收任务
 			gcAssistAlloc(assistG)
 		}
 	}
@@ -1213,6 +1216,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 		assistG.gcAssistBytes -= int64(size - dataSize)
 	}
 
+	// 检查是否需要gc
 	if shouldhelpgc {
 		if t := (gcTrigger{kind: gcTriggerHeap}); t.test() {
 			gcStart(t)

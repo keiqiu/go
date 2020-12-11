@@ -155,35 +155,42 @@ func markroot(gcw *gcWork, i uint32) {
 	// Note: if you add a case here, please also update heapdump.go:dumproots.
 	switch {
 	case baseFlushCache <= i && i < baseData:
+		// 释放mcache中的span
 		flushmcache(int(i - baseFlushCache))
 
 	case baseData <= i && i < baseBSS:
+		// 扫描可读写的全局变量
 		for _, datap := range activeModules() {
 			markrootBlock(datap.data, datap.edata-datap.data, datap.gcdatamask.bytedata, gcw, int(i-baseData))
 		}
 
 	case baseBSS <= i && i < baseSpans:
+		// 扫描只读的全局队列
 		for _, datap := range activeModules() {
 			markrootBlock(datap.bss, datap.ebss-datap.bss, datap.gcbssmask.bytedata, gcw, int(i-baseBSS))
 		}
 
 	case i == fixedRootFinalizers:
+		// 扫描Finalizer队列
 		for fb := allfin; fb != nil; fb = fb.alllink {
 			cnt := uintptr(atomic.Load(&fb.cnt))
 			scanblock(uintptr(unsafe.Pointer(&fb.fin[0])), cnt*unsafe.Sizeof(fb.fin[0]), &finptrmask[0], gcw, nil)
 		}
 
 	case i == fixedRootFreeGStacks:
+		// 释放已经终止的stack
 		// Switch to the system stack so we can call
 		// stackfree.
 		systemstack(markrootFreeGStacks)
 
 	case baseSpans <= i && i < baseStacks:
+		// 扫描MSpan.specials
 		// mark mspan.specials
 		markrootSpans(gcw, int(i-baseSpans))
 
 	default:
 		// the rest is scanning goroutine stacks
+		// 获取需要扫描的g
 		var gp *g
 		if baseStacks <= i && i < end {
 			gp = allgs[i-baseStacks]
@@ -200,6 +207,7 @@ func markroot(gcw *gcWork, i uint32) {
 
 		// scang must be done on the system stack in case
 		// we're trying to scan our own stack.
+		// 转交给g0进行扫描
 		systemstack(func() {
 			// If this is a self-scan, put the user G in
 			// _Gwaiting to prevent self-deadlock. It may
@@ -207,6 +215,7 @@ func markroot(gcw *gcWork, i uint32) {
 			// worker or we're in mark termination.
 			userG := getg().m.curg
 			selfScan := gp == userG && readgstatus(userG) == _Grunning
+			// 如果是扫描自己的，则转换自己的g的状态
 			if selfScan {
 				casgstatus(userG, _Grunning, _Gwaiting)
 				userG.waitreason = waitReasonGarbageCollectionScan
@@ -219,6 +228,7 @@ func markroot(gcw *gcWork, i uint32) {
 			// we scan the stacks we can and ask running
 			// goroutines to scan themselves; and the
 			// second blocks.
+			// 扫描g的栈
 			scang(gp, gcw)
 
 			if selfScan {
@@ -239,6 +249,7 @@ func markrootBlock(b0, n0 uintptr, ptrmask0 *uint8, gcw *gcWork, shard int) {
 	}
 
 	b := b0 + uintptr(shard)*rootBlockBytes
+	// 如果需扫描的block区域，超出b0+n0的区域，直接返回
 	if b >= b0+n0 {
 		return
 	}
@@ -249,6 +260,7 @@ func markrootBlock(b0, n0 uintptr, ptrmask0 *uint8, gcw *gcWork, shard int) {
 	}
 
 	// Scan this shard.
+	// 扫描给定block的shard
 	scanblock(b, n, ptrmask, gcw, nil)
 }
 
@@ -881,20 +893,25 @@ const (
 // scan work.
 //
 //go:nowritebarrier
+// gcDrain扫描所有的roots和对象，并表黑灰色对象，知道所有的roots和对象都被标记
 func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 	if !writeBarrier.needed {
 		throw("gcDrain phase incorrect")
 	}
 
 	gp := getg().m.curg
+	// 看到抢占标识是否要返回
 	preemptible := flags&gcDrainUntilPreempt != 0
+	// 是否计算后台的扫描量来减少辅助GC和唤醒等待中的G
 	flushBgCredit := flags&gcDrainFlushBgCredit != 0
+	// 是否在空闲的时候执行标记任务
 	idle := flags&gcDrainIdle != 0
-
+	// 记录初始的已经执行过的扫描任务
 	initScanWork := gcw.scanWork
 
 	// checkWork is the scan work before performing the next
 	// self-preempt check.
+	// 设置对应模式的工作检查函数
 	checkWork := int64(1<<63 - 1)
 	var check func() bool
 	if flags&(gcDrainIdle|gcDrainFractional) != 0 {
@@ -907,12 +924,14 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 	}
 
 	// Drain root marking jobs.
+	// 如果root对象没有扫描完，则扫描
 	if work.markrootNext < work.markrootJobs {
 		for !(preemptible && gp.preempt) {
 			job := atomic.Xadd(&work.markrootNext, +1) - 1
 			if job >= work.markrootJobs {
 				break
 			}
+			// 执行root扫描任务
 			markroot(gcw, job)
 			if check != nil && check() {
 				goto done
@@ -921,6 +940,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 	}
 
 	// Drain heap marking jobs.
+	// 循环直到被抢占
 	for !(preemptible && gp.preempt) {
 		// Try to keep work available on the global queue. We used to
 		// check if there were waiting workers, but it's better to
@@ -928,6 +948,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 		// worst case, we'll do O(log(_WorkbufSize)) unnecessary
 		// balances.
 		if work.full == 0 {
+			// 平衡工作，如果全局的标记队列为空，则分一部分工作到全局队列中
 			gcw.balance()
 		}
 
@@ -942,15 +963,18 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 				b = gcw.tryGet()
 			}
 		}
+		// 获取任务失败，跳出循环
 		if b == 0 {
 			// Unable to get work.
 			break
 		}
+		// 扫描获取的到对象
 		scanobject(b, gcw)
 
 		// Flush background scan work credit to the global
 		// account if we've accumulated enough locally so
 		// mutator assists can draw on it.
+		// 如果当前扫描的数量超过了 gcCreditSlack，就把扫描的对象数量加到全局的数量，批量更新
 		if gcw.scanWork >= gcCreditSlack {
 			atomic.Xaddint64(&gcController.scanWork, gcw.scanWork)
 			if flushBgCredit {
@@ -960,6 +984,8 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 			checkWork -= gcw.scanWork
 			gcw.scanWork = 0
 
+			// 如果扫描的对象数量已经达到了 执行下次抢占的目标数量 checkWork， 则调用对应模式的函数
+			// idle模式为 pollWork， Fractional模式为 pollFractionalWorkerExit ，在第20行
 			if checkWork <= 0 {
 				checkWork += drainCheckThreshold
 				if check != nil && check() {
@@ -972,6 +998,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 done:
 	// Flush remaining scan work credit.
 	if gcw.scanWork > 0 {
+		// 把扫描的对象数量添加到全局
 		atomic.Xaddint64(&gcController.scanWork, gcw.scanWork)
 		if flushBgCredit {
 			gcFlushBgCredit(gcw.scanWork - initScanWork)
@@ -1074,6 +1101,7 @@ func scanblock(b0, n0 uintptr, ptrmask *uint8, gcw *gcWork, stk *stackScanState)
 
 	for i := uintptr(0); i < n; {
 		// Find bits for the next word.
+		// 找到bitmap中对应的bits
 		bits := uint32(*addb(ptrmask, i/(sys.PtrSize*8)))
 		if bits == 0 {
 			i += sys.PtrSize * 8
@@ -1081,9 +1109,11 @@ func scanblock(b0, n0 uintptr, ptrmask *uint8, gcw *gcWork, stk *stackScanState)
 		}
 		for j := 0; j < 8 && i < n; j++ {
 			if bits&1 != 0 {
+				// 如果该地址包含指针
 				// Same work as in scanobject; see comments there.
 				p := *(*uintptr)(unsafe.Pointer(b + i))
 				if p != 0 {
+					// 如果该地址下找到了对应的对象，标灰
 					if obj, span, objIndex := findObject(p, b, i); obj != 0 {
 						greyobject(obj, b, i, span, gcw, objIndex)
 					} else if stk != nil && p >= stk.stack.lo && p < stk.stack.hi {
@@ -1109,13 +1139,15 @@ func scanobject(b uintptr, gcw *gcWork) {
 	// b is either the beginning of an object, in which case this
 	// is the size of the object to scan, or it points to an
 	// oblet, in which case we compute the size to scan below.
+	// 获取b对应的bits
 	hbits := heapBitsForAddr(b)
+	// 获取b所在的span
 	s := spanOfUnchecked(b)
 	n := s.elemsize
 	if n == 0 {
 		throw("scanobject n == 0")
 	}
-
+	// 对象过大，则切割后再扫描，maxObletBytes为128k
 	if n > maxObletBytes {
 		// Large object. Break into oblets for better
 		// parallelism and lower latency.
@@ -1125,6 +1157,7 @@ func scanobject(b uintptr, gcw *gcWork) {
 			// paths), in which case we must *not* enqueue
 			// oblets since their bitmaps will be
 			// uninitialized.
+			// 如果不是指针，直接标记返回，相当于标黑了
 			if s.spanclass.noscan() {
 				// Bypass the whole scan.
 				gcw.bytesMarked += uint64(n)
@@ -1136,6 +1169,7 @@ func scanobject(b uintptr, gcw *gcWork) {
 			// these will be marked as "no more pointers",
 			// so we'll drop out immediately when we go to
 			// scan those.
+			// 按maxObletBytes切割后放入到 队列
 			for oblet := b + maxObletBytes; oblet < s.base()+s.elemsize; oblet += maxObletBytes {
 				if !gcw.putFast(oblet) {
 					gcw.put(oblet)
@@ -1155,6 +1189,7 @@ func scanobject(b uintptr, gcw *gcWork) {
 	var i uintptr
 	for i = 0; i < n; i += sys.PtrSize {
 		// Find bits for this word.
+		// 获取到对应的bits
 		if i != 0 {
 			// Avoid needless hbits.next() on last iteration.
 			hbits = hbits.next()
@@ -1168,6 +1203,7 @@ func scanobject(b uintptr, gcw *gcWork) {
 		if i != 1*sys.PtrSize && bits&bitScan == 0 {
 			break // no more pointers in this object
 		}
+		// 不是指针，继续
 		if bits&bitPointer == 0 {
 			continue // not a pointer
 		}
@@ -1188,6 +1224,7 @@ func scanobject(b uintptr, gcw *gcWork) {
 			// heap. In this case, we know the object was
 			// just allocated and hence will be marked by
 			// allocation itself.
+			// 找到指针对应的对象，并标灰
 			if obj, span, objIndex := findObject(obj, b, i); obj != 0 {
 				greyobject(obj, b, i, span, gcw, objIndex)
 			}
@@ -1223,6 +1260,7 @@ func greyobject(obj, base, off uintptr, span *mspan, gcw *gcWork, objIndex uintp
 	mbits := span.markBitsForIndex(objIndex)
 
 	if useCheckmark {
+		// 这里是用来debug，确保所有的对象都被正确标识
 		if !mbits.isMarked() {
 			printlock()
 			print("runtime:greyobject: checkmarks finds unexpected unmarked object obj=", hex(obj), "\n")
@@ -1255,9 +1293,11 @@ func greyobject(obj, base, off uintptr, span *mspan, gcw *gcWork, objIndex uintp
 		}
 
 		// If marked we have nothing to do.
+		// 对象被正确标记了，无需做其他的操作
 		if mbits.isMarked() {
 			return
 		}
+		// 标记对象
 		mbits.setMarked()
 
 		// Mark span.
@@ -1268,6 +1308,7 @@ func greyobject(obj, base, off uintptr, span *mspan, gcw *gcWork, objIndex uintp
 
 		// If this is a noscan object, fast-track it to black
 		// instead of greying it.
+		// 如果对象不是指针，则只需要标记，不需要放进队列，相当于直接标黑
 		if span.spanclass.noscan() {
 			gcw.bytesMarked += uint64(span.elemsize)
 			return
@@ -1280,6 +1321,7 @@ func greyobject(obj, base, off uintptr, span *mspan, gcw *gcWork, objIndex uintp
 	// Previously we put the obj in an 8 element buffer that is drained at a rate
 	// to give the PREFETCH time to do its work.
 	// Use of PREFETCHNTA might be more appropriate than PREFETCH
+	// 判断对象是否被放进队列，没有则放入，标灰步骤完成
 	if !gcw.putFast(obj) {
 		gcw.put(obj)
 	}

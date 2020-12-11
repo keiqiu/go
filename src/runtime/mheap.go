@@ -2009,12 +2009,14 @@ func freespecial(s *special, p unsafe.Pointer, size uintptr) {
 type gcBits uint8
 
 // bytep returns a pointer to the n'th byte of b.
+// 返回第n byte
 func (b *gcBits) bytep(n uintptr) *uint8 {
 	return addb((*uint8)(b), n)
 }
 
 // bitp returns a pointer to the byte containing bit n and a mask for
 // selecting that bit from *bytep.
+// 返回第n bit所在数据和选择该位的掩码， bytep & mast  > 0 则表示该位为1
 func (b *gcBits) bitp(n uintptr) (bytep *uint8, mask uint8) {
 	return b.bytep(n / 8), 1 << (n % 8)
 }

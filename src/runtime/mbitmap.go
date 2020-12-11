@@ -246,10 +246,13 @@ func (s *mspan) nextFreeIndex() uintptr {
 }
 
 // isFree reports whether the index'th object in s is unallocated.
+// 判断当前未是否为空
 func (s *mspan) isFree(index uintptr) bool {
+	// index小于free游标，则肯定为有元素
 	if index < s.freeindex {
 		return false
 	}
+	// 取到当前bit的值，是否为0
 	bytep, mask := s.allocBits.bitp(index)
 	return *bytep&mask == 0
 }
@@ -288,6 +291,7 @@ func (m markBits) isMarked() bool {
 }
 
 // setMarked sets the marked bit in the markbits, atomically.
+// 将当前bit设置为1
 func (m markBits) setMarked() {
 	// Might be racing with other updates, so use atomic update always.
 	// We used to be clever here and use a non-atomic update in certain
@@ -296,11 +300,13 @@ func (m markBits) setMarked() {
 }
 
 // setMarkedNonAtomic sets the marked bit in the markbits, non-atomically.
+// 将当前bit设置为1
 func (m markBits) setMarkedNonAtomic() {
 	*m.bytep |= m.mask
 }
 
 // clearMarked clears the marked bit in the markbits, atomically.
+// 清除当前bit
 func (m markBits) clearMarked() {
 	// Might be racing with other updates, so use atomic update always.
 	// We used to be clever here and use a non-atomic update in certain
@@ -866,6 +872,7 @@ func (h heapBits) clearCheckmarkSpan(size, n, total uintptr) {
 // oneBitCount is indexed by byte and produces the
 // number of 1 bits in that byte. For example 128 has 1 bit set
 // and oneBitCount[128] will holds 1.
+// 这是一个索引表，对应的是一个uint8的整数为1的数据，如当num=1， oneBitCount[num] = 1 表示只有1位为1。 当num=3（0000 0011）， oneBitCount[3] = 2 表示2位为1
 var oneBitCount = [256]uint8{
 	0, 1, 1, 2, 1, 2, 2, 3,
 	1, 2, 2, 3, 2, 3, 3, 4,
@@ -903,6 +910,7 @@ var oneBitCount = [256]uint8{
 // countAlloc returns the number of objects allocated in span s by
 // scanning the allocation bitmap.
 // TODO:(rlh) Use popcount intrinsic.
+// 计算gcmarkBits中为1的数据有多少
 func (s *mspan) countAlloc() int {
 	count := 0
 	maxIndex := s.nelems / 8

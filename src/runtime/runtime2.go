@@ -652,7 +652,8 @@ type p struct {
 	gcAssistTime         int64 // Nanoseconds in assistAlloc
 	gcFractionalMarkTime int64 // Nanoseconds in fractional mark worker (atomic)
 	// gc的工作g的指针，如果gcBgMarkWorker!=nil 则进入gc的调度
-	gcBgMarkWorker   guintptr // (atomic)
+	gcBgMarkWorker guintptr // (atomic)
+	// gc的工作模式
 	gcMarkWorkerMode gcMarkWorkerMode
 
 	// gcMarkWorkerStartTime is the nanotime() at which this mark
