@@ -1261,6 +1261,7 @@ func largeAlloc(size uintptr, needzero bool, noscan bool) *mspan {
 // compiler (both frontend and SSA backend) knows the signature
 // of this function
 // 所有堆的内存分配都通过此函数
+// 由此函数分配的对象，我们称之为逃逸
 func newobject(typ *_type) unsafe.Pointer {
 	return mallocgc(typ.size, typ, true)
 }
