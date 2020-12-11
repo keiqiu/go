@@ -3462,7 +3462,7 @@ func newproc(siz int32, fn *funcval) { // fn就是proc.go@main函数
 // Create a new g running fn with narg bytes of arguments starting
 // at argp. callerpc is the address of the go statement that created
 // this. The new g is put on the queue of g's waiting to run.
-// 新建一个新的g来执行函数
+// 新建一个新的g来执行函数，执行go func 时调用
 func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintptr) {
 	// 获取当前g，如果newproc调用的话，callergp也是g0， 如果通过go关键字调用 则callergp不是g0
 	_g_ := getg()
