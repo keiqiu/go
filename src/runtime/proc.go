@@ -2651,6 +2651,7 @@ top:
 			tryWakeP = true
 		}
 	}
+	// 如果当前有gc的任务需要处理，处理gc任务
 	if gp == nil && gcBlackenEnabled != 0 {
 		gp = gcController.findRunnableGCWorker(_g_.m.p.ptr())
 		tryWakeP = tryWakeP || gp != nil
