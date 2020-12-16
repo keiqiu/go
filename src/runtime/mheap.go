@@ -1453,6 +1453,7 @@ func (h *mheap) growAddSpan(v unsafe.Pointer, size uintptr) {
 //
 // large must match the value of large passed to mheap.alloc. This is
 // used for accounting.
+// 将span的空间返回到堆上
 func (h *mheap) freeSpan(s *mspan, large bool) {
 	systemstack(func() {
 		mp := getg().m

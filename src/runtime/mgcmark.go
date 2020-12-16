@@ -142,6 +142,7 @@ var oneptrmask = [...]uint8{1}
 //
 //go:nowritebarrier
 // gcStart->gcBgMarkStartWorkers->gcBgMarkWorker->gcDrain->markroot
+// 扫描root
 func markroot(gcw *gcWork, i uint32) {
 	// TODO(austin): This is a bit ridiculous. Compute and store
 	// the bases in gcMarkRootPrepare instead of the counts.
@@ -155,17 +156,17 @@ func markroot(gcw *gcWork, i uint32) {
 	// Note: if you add a case here, please also update heapdump.go:dumproots.
 	switch {
 	case baseFlushCache <= i && i < baseData:
-		// 释放mcache中的span
+		// 释放mcache中的span 每个P的本地mcache
 		flushmcache(int(i - baseFlushCache))
 
 	case baseData <= i && i < baseBSS:
-		// 扫描可读写的全局变量
+		// 扫描可读写的全局变量 每个活跃模块的数据段
 		for _, datap := range activeModules() {
 			markrootBlock(datap.data, datap.edata-datap.data, datap.gcdatamask.bytedata, gcw, int(i-baseData))
 		}
 
 	case baseBSS <= i && i < baseSpans:
-		// 扫描只读的全局队列
+		// 扫描只读的全局队列 每个活跃模块的BSS段
 		for _, datap := range activeModules() {
 			markrootBlock(datap.bss, datap.ebss-datap.bss, datap.gcbssmask.bytedata, gcw, int(i-baseBSS))
 		}
@@ -178,7 +179,7 @@ func markroot(gcw *gcWork, i uint32) {
 		}
 
 	case i == fixedRootFreeGStacks:
-		// 释放已经终止的stack
+		// 释放已经终止的stack  每个G的栈
 		// Switch to the system stack so we can call
 		// stackfree.
 		systemstack(markrootFreeGStacks)
@@ -672,6 +673,7 @@ func gcFlushBgCredit(scanWork int64) {
 //
 //go:nowritebarrier
 //go:systemstack
+// 扫描g 的栈区
 func scanstack(gp *g, gcw *gcWork) {
 	if gp.gcscanvalid {
 		return
@@ -695,11 +697,13 @@ func scanstack(gp *g, gcw *gcWork) {
 		// ok
 	}
 
+	// 不能扫描自己的栈
 	if gp == getg() {
 		throw("can't scan our own stack")
 	}
 
 	// Shrink the stack if not much of it is being used.
+	// 栈大小时候需要调整，释放栈空间
 	shrinkstack(gp)
 
 	var state stackScanState
@@ -712,6 +716,7 @@ func scanstack(gp *g, gcw *gcWork) {
 	// Scan the saved context register. This is effectively a live
 	// register that gets moved back and forth between the
 	// register and sched.ctxt without a write barrier.
+	// amd64没有这个问题
 	if gp.sched.ctxt != nil {
 		scanblock(uintptr(unsafe.Pointer(&gp.sched.ctxt)), sys.PtrSize, &oneptrmask[0], gcw, &state)
 	}
@@ -911,7 +916,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 
 	// checkWork is the scan work before performing the next
 	// self-preempt check.
-	// 设置对应模式的工作检查函数
+	// 设置对应模式的工作检查函数  0xEFFF FFFF FFFF FFFF
 	checkWork := int64(1<<63 - 1)
 	var check func() bool
 	if flags&(gcDrainIdle|gcDrainFractional) != 0 {
@@ -952,6 +957,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 			gcw.balance()
 		}
 
+		// 获取灰色的标记
 		b := gcw.tryGetFast()
 		if b == 0 {
 			b = gcw.tryGet()
@@ -968,7 +974,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 			// Unable to get work.
 			break
 		}
-		// 扫描获取的到对象
+		// 扫描获取的到的灰色对象
 		scanobject(b, gcw)
 
 		// Flush background scan work credit to the global
@@ -1297,7 +1303,7 @@ func greyobject(obj, base, off uintptr, span *mspan, gcw *gcWork, objIndex uintp
 		if mbits.isMarked() {
 			return
 		}
-		// 标记对象
+		// 标记对象为black
 		mbits.setMarked()
 
 		// Mark span.
@@ -1321,7 +1327,7 @@ func greyobject(obj, base, off uintptr, span *mspan, gcw *gcWork, objIndex uintp
 	// Previously we put the obj in an 8 element buffer that is drained at a rate
 	// to give the PREFETCH time to do its work.
 	// Use of PREFETCHNTA might be more appropriate than PREFETCH
-	// 判断对象是否被放进队列，没有则放入，标灰步骤完成
+	// 判断对象是否被放进队列，没有则放入灰色队列，标灰步骤完成
 	if !gcw.putFast(obj) {
 		gcw.put(obj)
 	}

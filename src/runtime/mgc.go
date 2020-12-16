@@ -269,7 +269,7 @@ var writeBarrier struct {
 // gcBlackenEnabled is 1 if mutator assists and background mark
 // workers are allowed to blacken objects. This must only be set when
 // gcphase == _GCmark.
-// 当为1时，则开启写屏障
+// 当为1时，则开启后台标记
 var gcBlackenEnabled uint32
 
 const (
@@ -281,6 +281,7 @@ const (
 //go:nosplit
 func setGCPhase(x uint32) {
 	atomic.Store(&gcphase, x)
+	// 设置是否需要写屏障
 	writeBarrier.needed = gcphase == _GCmark || gcphase == _GCmarktermination
 	writeBarrier.enabled = writeBarrier.needed || writeBarrier.cgo
 }
@@ -1385,7 +1386,7 @@ func gcStart(trigger gcTrigger) {
 	// black invariant. Enable mutator assists to
 	// put back-pressure on fast allocating
 	// mutators.
-	// 开启写屏障
+	// 开启后台标记
 	atomic.Store(&gcBlackenEnabled, 1)
 
 	// Assists and workers can start the moment we start
@@ -1550,6 +1551,7 @@ top:
 	if trace.enabled {
 		traceGCSTWStart(0)
 	}
+	// stop the world
 	systemstack(stopTheWorldWithSema)
 	// The gcphase is _GCmark, it will transition to _GCmarktermination
 	// below. The important thing is that the wb remains active until
@@ -1611,6 +1613,7 @@ top:
 
 	// Disable assists and background workers. We must do
 	// this before waking blocked assists.
+	// 关闭后台gc状态
 	atomic.Store(&gcBlackenEnabled, 0)
 
 	// Wake all blocked assists. These will run when we
@@ -1943,6 +1946,8 @@ func gcBgMarkWorker(_p_ *p) {
 			return true
 		}, unsafe.Pointer(park), waitReasonGCWorkerIdle, traceEvGoBlock, 0)
 
+		// 以下逻辑运行时协程已经被唤醒
+
 		// Loop until the P dies and disassociates this
 		// worker (the P may later be reused, in which case
 		// it will get a new worker) or we failed to associate.
@@ -1952,15 +1957,13 @@ func gcBgMarkWorker(_p_ *p) {
 			break
 		}
 
-		// 此时已经被唤醒
-
 		// Disable preemption so we can use the gcw. If the
 		// scheduler wants to preempt us, we'll stop draining,
 		// dispose the gcw, and then preempt.
 		// gopark第一个函数中释放了m，这里再抢占回来
 		park.m.set(acquirem())
 
-		// 如果没开启写屏障，报错
+		// 如果没开启后台标记，报错
 		if gcBlackenEnabled == 0 {
 			throw("gcBgMarkWorker: blackening not enabled")
 		}
@@ -2056,6 +2059,7 @@ func gcBgMarkWorker(_p_ *p) {
 			_p_.gcBgMarkWorker.set(nil)
 			releasem(park.m.ptr())
 
+			// gc标记完成
 			gcMarkDone()
 
 			// Disable preemption and prepare to reattach
@@ -2179,6 +2183,7 @@ func gcMark(start_time int64) {
 // gcSweep must be called on the system stack because it acquires the heap
 // lock. See mheap for details.
 //go:systemstack
+// 清扫
 func gcSweep(mode gcMode) {
 	if gcphase != _GCoff {
 		throw("gcSweep being done but phase is not GCoff")
@@ -2201,7 +2206,7 @@ func gcSweep(mode gcMode) {
 	mheap_.reclaimCredit = 0
 	unlock(&mheap_.lock)
 
-	// 如果不是并行GC，或者强制GC
+	// 如果不是并行GC，或者是强制GC
 	if !_ConcurrentSweep || mode == gcForceBlockMode {
 		// Special case synchronous sweep.
 		// Record that no proportional sweeping has to happen.

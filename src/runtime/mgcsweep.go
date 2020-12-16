@@ -152,6 +152,7 @@ func sweepone() uintptr {
 			// Whole span was freed. Count it toward the
 			// page reclaimer credit since these pages can
 			// now be used for span allocation.
+			// 整个 span 都已被释放，记录释放的额度，因为整个页都能用作 span 分配了
 			atomic.Xadduintptr(&mheap_.reclaimCredit, npages)
 		} else {
 			// Span is still in-use, so this returned no
@@ -219,6 +220,7 @@ func (s *mspan) ensureSwept() {
 // Returns true if the span was returned to heap.
 // If preserve=true, don't return it to heap nor relink in mcentral lists;
 // caller takes care of it.
+// 清理当前的span
 func (s *mspan) sweep(preserve bool) bool {
 	// It's critical that we enter this function with preemption disabled,
 	// GC must not start while we are in the middle of this function.
@@ -368,7 +370,7 @@ func (s *mspan) sweep(preserve bool) bool {
 	s.gcmarkBits = newMarkBits(s.nelems)
 
 	// Initialize alloc bits cache.
-	// 更新allocCach
+	// 更新allocCache
 	s.refillAllocCache(0)
 
 	// We need to set s.sweepgen = h.sweepgen only when all blocks are swept,

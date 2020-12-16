@@ -579,7 +579,9 @@ func schedinit() {
 	// 初始化cpu选项
 	cpuinit() // must run before alginit
 	//  初始化hash函数
-	alginit()       // maps must not be used before this call
+	alginit() // maps must not be used before this call
+
+	// 模块加载相关的初始化
 	modulesinit()   // provides activeModules
 	typelinksinit() // uses maps, activeModules
 	itabsinit()     // uses activeModules
@@ -896,6 +898,7 @@ func casgcopystack(gp *g) uint32 {
 // scang blocks until gp's stack has been scanned.
 // It might be scanned by scang or it might be scanned by the goroutine itself.
 // Either way, the stack scan has completed when scang returns.
+// 扫描g的栈
 func scang(gp *g, gcw *gcWork) {
 	// Invariant; we (the caller, markroot for a specific goroutine) own gp.gcscandone.
 	// Nothing is racing with us now, but gcscandone might be set to true left over

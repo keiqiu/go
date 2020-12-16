@@ -991,7 +991,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	// GC is not currently active.
 	// 当前的g，如果gc当前不是活跃状态，则g==nil
 	var assistG *g
-	// 如果写屏障开启
+	// 如果没开启后台标记
 	if gcBlackenEnabled != 0 {
 		// Charge the current user G for this allocation.
 		// 让出资源

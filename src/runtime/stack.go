@@ -1083,6 +1083,7 @@ func gostartcallfn(gobuf *gobuf, fv *funcval) {
 // Maybe shrink the stack being used by gp.
 // Called at garbage collection time.
 // gp must be stopped, but the world need not be.
+// 尝试缩小栈的容量，只在gc时调用，此时g必须是停止的，但无需stw
 func shrinkstack(gp *g) {
 	gstatus := readgstatus(gp)
 	if gp.stack.lo == 0 {
