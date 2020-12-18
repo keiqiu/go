@@ -1395,7 +1395,7 @@ func gcStart(trigger gcTrigger) {
 
 	// Concurrent mark.
 	systemstack(func() {
-		// 再一次执行ST
+		// 再一次执行ST 启用世界
 		now = startTheWorldWithSema(trace.enabled)
 		work.pauseNS += now - work.pauseStart
 		work.tMark = now

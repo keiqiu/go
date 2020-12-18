@@ -4,7 +4,7 @@
 
 #include "textflag.h"
 
-// 启动入口
+// 启动入口 asm_amd64.s
 TEXT _rt0_amd64_linux(SB),NOSPLIT,$-8
 	JMP	_rt0_amd64(SB)
 
