@@ -1328,6 +1328,7 @@ func greyobject(obj, base, off uintptr, span *mspan, gcw *gcWork, objIndex uintp
 	// to give the PREFETCH time to do its work.
 	// Use of PREFETCHNTA might be more appropriate than PREFETCH
 	// 判断对象是否被放进队列，没有则放入灰色队列，标灰步骤完成
+	// 所有的黑色对象标记在span的gcmarkBits上，灰色对象放到gcw（gcWork）的队列中， 剩下的就是白色的了
 	if !gcw.putFast(obj) {
 		gcw.put(obj)
 	}
