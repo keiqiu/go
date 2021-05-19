@@ -5464,9 +5464,11 @@ func sync_runtime_canSpin(i int) bool {
 	// GOMAXPROCS>1 and there is at least one other running P and local runq is empty.
 	// As opposed to runtime mutex we don't do passive spinning here,
 	// because there can be work on global runq or on other Ps.
+	// iter大等于4或者cpu核数小等于1 或者最大p的数量小于等于空闲p的数量+1+自旋M的数量 不允许自旋
 	if i >= active_spin || ncpu <= 1 || gomaxprocs <= int32(sched.npidle+sched.nmspinning)+1 {
 		return false
 	}
+	// 当前的p没有本地的g需要处理，不允许自旋
 	if p := getg().m.p.ptr(); !runqempty(p) {
 		return false
 	}
@@ -5475,6 +5477,7 @@ func sync_runtime_canSpin(i int) bool {
 
 //go:linkname sync_runtime_doSpin sync.runtime_doSpin
 //go:nosplit
+// 执行30次PAUSE指令，自旋
 func sync_runtime_doSpin() {
 	procyield(active_spin_cnt)
 }
