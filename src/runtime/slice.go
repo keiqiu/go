@@ -11,11 +11,12 @@ import (
 )
 
 type slice struct {
-	array unsafe.Pointer
-	len   int
-	cap   int
+	array unsafe.Pointer // 指针
+	len   int            // 长度
+	cap   int            // 容量
 }
 
+// 这是一个不在gc堆上管理的slice结构，go:notinheap 适用于类型声明，表明了一个类型必须不被分配在 GC 堆上。特别的，指向该类型的指针总是应当在 runtime.inheap 判断中失败。这个类型可能被用于全局变量、栈上变量，或者堆外内存上的对象（比如通过 sysAlloc、persistentalloc、fixalloc 或者其它手动管理的 span 进行分配
 // An notInHeapSlice is a slice backed by go:notinheap memory.
 type notInHeapSlice struct {
 	array *notInHeap
@@ -46,6 +47,7 @@ func makeslice(et *_type, len, cap int) unsafe.Pointer {
 		panicmakeslicecap()
 	}
 
+	// 分配一个et结构指定大小的内存，其实就是分配了一片连续的空间（数组）
 	return mallocgc(mem, et, true)
 }
 
@@ -86,12 +88,16 @@ func growslice(et *_type, old slice, cap int) slice {
 		panic(errorString("growslice: cap out of range"))
 	}
 
+	// 空的结构，无需扩容，直接返回一个新的空结构就行了
 	if et.size == 0 {
 		// append should not create a slice with nil pointer but non-zero len.
 		// We assume that append doesn't need to preserve old.array in this case.
 		return slice{unsafe.Pointer(&zerobase), old.len, cap}
 	}
 
+	// 如果要求扩容的大小大于2*old.cap则已指定的为准
+	// 如果old.cap<1024，则进行双倍扩容
+	// 如果old.cap>1024，则进行0.25倍扩容
 	newcap := old.cap
 	doublecap := newcap + newcap
 	if cap > doublecap {
@@ -169,7 +175,7 @@ func growslice(et *_type, old slice, cap int) slice {
 	if overflow || capmem > maxAlloc {
 		panic(errorString("growslice: cap out of range"))
 	}
-
+	// 区分是否有指针的情况，如果没有指针，顺带清空一下当前分配区域的空间的变量
 	var p unsafe.Pointer
 	if et.ptrdata == 0 {
 		p = mallocgc(capmem, nil, false)
@@ -185,6 +191,7 @@ func growslice(et *_type, old slice, cap int) slice {
 			bulkBarrierPreWriteSrcOnly(uintptr(p), uintptr(old.array), lenmem)
 		}
 	}
+	// 拷贝数据到新的切片
 	memmove(p, old.array, lenmem)
 
 	return slice{p, old.len, newcap}
@@ -194,6 +201,7 @@ func isPowerOfTwo(x uintptr) bool {
 	return x&(x-1) == 0
 }
 
+// 切片拷贝
 func slicecopy(to, fm slice, width uintptr) int {
 	if fm.len == 0 || to.len == 0 {
 		return 0
@@ -220,6 +228,7 @@ func slicecopy(to, fm slice, width uintptr) int {
 	}
 
 	size := uintptr(n) * width
+	// 如果只有一个字节，那就直接复制一下吧，省的调用memmove了
 	if size == 1 { // common case worth about 2x to do here
 		// TODO: is this still worth it with new memmove impl?
 		*(*byte)(to.array) = *(*byte)(fm.array) // known to be a byte pointer
