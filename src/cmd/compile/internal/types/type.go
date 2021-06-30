@@ -341,12 +341,14 @@ type Tuple struct {
 	// Any tuple with a memory type must put that memory type second.
 }
 
+// 数组
 // Array contains Type fields specific to array types.
 type Array struct {
 	Elem  *Type // element type
 	Bound int64 // number of elements; <0 if unknown yet
 }
 
+// 切片
 // Slice contains Type fields specific to slice types.
 type Slice struct {
 	Elem *Type // element type
@@ -490,10 +492,12 @@ func NewArray(elem *Type, bound int64) *Type {
 	}
 	t := New(TARRAY)
 	t.Extra = &Array{Elem: elem, Bound: bound}
+	// 在数据创建的时候决定是否在堆上
 	t.SetNotInHeap(elem.NotInHeap())
 	return t
 }
 
+// 创建slice
 // NewSlice returns the slice Type with element type elem.
 func NewSlice(elem *Type) *Type {
 	if t := elem.Cache.slice; t != nil {
