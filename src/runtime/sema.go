@@ -37,6 +37,10 @@ import (
 // See golang.org/issue/17953 for a program that worked badly
 // before we introduced the second level of list, and test/locklinear.go
 // for a test that exercises this.
+// 一个 semaRoot 持有不同地址的 sudog 的平衡树
+// 每一个 sudog 可能反过来指向等待在同一个地址上的 sudog 的列表
+// 对同一个地址上的 sudog 的内联列表的操作的时间复杂度都是O(1)，扫描 semaRoot 的顶部列表是 O(log n)
+// n 是 hash 到并且阻塞在同一个 semaRoot 上的不同地址的 goroutines 的总数
 type semaRoot struct {
 	lock  mutex
 	treap *sudog // root of balanced tree of unique waiters.
@@ -80,6 +84,7 @@ func readyWithTime(s *sudog, traceskip int) {
 	if s.releasetime != 0 {
 		s.releasetime = cputicks()
 	}
+	// 唤起协程
 	goready(s.g, traceskip)
 }
 
@@ -95,6 +100,7 @@ func semacquire(addr *uint32) {
 	semacquire1(addr, false, 0, 0)
 }
 
+// 阻塞g
 func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes int) {
 	gp := getg()
 	if gp != gp.m.curg {
@@ -112,7 +118,9 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	//	enqueue itself as a waiter
 	//	sleep
 	//	(waiter descriptor is dequeued by signaler)
+	// 获取一个 sudog
 	s := acquireSudog()
+	// 根据地址获取一个root
 	root := semroot(addr)
 	t0 := int64(0)
 	s.releasetime = 0
@@ -140,8 +148,12 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 		}
 		// Any semrelease after the cansemacquire knows we're waiting
 		// (we set nwait above), so go to sleep.
+		// 将sudog添加到root的等待队列上
 		root.queue(addr, s, lifo)
+		// 解锁 semaRoot ，并且把当前 g 的状态改为等待，然后让当前的 m 调用其他的 g 执行，当前 g 相当于等待
 		goparkunlock(&root.lock, waitReasonSemacquire, traceEvGoBlockSync, 4+skipframes)
+
+		// 这里就被唤醒了
 		if s.ticket != 0 || cansemacquire(addr) {
 			break
 		}
@@ -149,6 +161,7 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	if s.releasetime > 0 {
 		blockevent(s.releasetime-t0, 3+skipframes)
 	}
+	// 释放sudog
 	releaseSudog(s)
 }
 
@@ -156,7 +169,9 @@ func semrelease(addr *uint32) {
 	semrelease1(addr, false, 0)
 }
 
+// s释放g
 func semrelease1(addr *uint32, handoff bool, skipframes int) {
+	// 获取semroot
 	root := semroot(addr)
 	atomic.Xadd(addr, 1)
 
@@ -175,6 +190,7 @@ func semrelease1(addr *uint32, handoff bool, skipframes int) {
 		unlock(&root.lock)
 		return
 	}
+	// 取出sudog
 	s, t0 := root.dequeue(addr)
 	if s != nil {
 		atomic.Xadd(&root.nwait, -1)
@@ -191,6 +207,7 @@ func semrelease1(addr *uint32, handoff bool, skipframes int) {
 		if handoff && cansemacquire(addr) {
 			s.ticket = 1
 		}
+		// 将sudog设置为ready状态
 		readyWithTime(s, 5+skipframes)
 	}
 }

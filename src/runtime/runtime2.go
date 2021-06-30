@@ -549,12 +549,12 @@ type m struct {
 	// 当前m的内存结构，小对象直接从mcache分配，m0的mcache是在初始化中分配，其他的m的mcache直接指向p的mcache
 	mcache        *mcache
 	lockedg       guintptr
-	createstack   [32]uintptr // stack that created this thread.
-	lockedExt     uint32      // tracking for external LockOSThread
-	lockedInt     uint32      // tracking for internal lockOSThread
-	nextwaitm     muintptr    // next m waiting for lock
-	waitunlockf   func(*g, unsafe.Pointer) bool
-	waitlock      unsafe.Pointer
+	createstack   [32]uintptr                   // stack that created this thread.
+	lockedExt     uint32                        // tracking for external LockOSThread
+	lockedInt     uint32                        // tracking for internal lockOSThread
+	nextwaitm     muintptr                      // next m waiting for lock
+	waitunlockf   func(*g, unsafe.Pointer) bool // 操作waitlock的函数
+	waitlock      unsafe.Pointer                // 锁，当调用gopark来阻塞g时，需要传一把锁，当m和g解绑之后，会释放锁
 	waittraceev   byte
 	waittraceskip int
 	startingtrace bool

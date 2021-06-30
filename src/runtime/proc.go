@@ -321,6 +321,7 @@ func gopark(unlockf func(*g, unsafe.Pointer) bool, lock unsafe.Pointer, reason w
 
 // Puts the current goroutine into a waiting state and unlocks the lock.
 // The goroutine can be made runnable again by calling goready(gp).
+// 当 g停止时，将会释放lock，这样后续就可以继续运行了
 func goparkunlock(lock *mutex, reason waitReason, traceEv byte, traceskip int) {
 	gopark(parkunlock_c, unsafe.Pointer(lock), reason, traceEv, traceskip)
 }
@@ -2772,6 +2773,7 @@ func park_m(gp *g) {
 	// 解绑m和g
 	dropg()
 
+	// 如果m上设置了waitunlock，则解绑g后，释放该锁
 	if fn := _g_.m.waitunlockf; fn != nil {
 		ok := fn(gp, _g_.m.waitlock)
 		_g_.m.waitunlockf = nil
@@ -5071,7 +5073,7 @@ const randomizeScheduler = raceenabled
 // If next is true, runqput puts g in the _p_.runnext slot.
 // If the run queue is full, runnext puts g on the global queue.
 // Executed only by the owner P.
-// 向p添加一个gorotinue，如果本地p的满了，则添加到全局
+// 向p添加一个gorotinue，如果本地p的满了，则添加到全局， 如果next为true，则直接放到队列的顶头
 func runqput(_p_ *p, gp *g, next bool) {
 	if randomizeScheduler && next && fastrand()%2 == 0 {
 		next = false
