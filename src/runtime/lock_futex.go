@@ -126,7 +126,7 @@ func unlock(l *mutex) {
 func noteclear(n *note) {
 	n.key = 0
 }
-
+// 通过futex的机制唤醒线程
 func notewakeup(n *note) {
 	old := atomic.Xchg(key32(&n.key), 1)
 	if old != 0 {
@@ -135,7 +135,7 @@ func notewakeup(n *note) {
 	}
 	futexwakeup(key32(&n.key), 1)
 }
-
+// 通过futex的机制使线程睡眠
 func notesleep(n *note) {
 	gp := getg()
 	if gp != gp.m.g0 {

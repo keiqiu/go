@@ -2585,6 +2585,7 @@ func resetspinning() {
 
 // Injects the list of runnable G's into the scheduler and clears glist.
 // Can run concurrently with GC.
+// 将glist中的goroutinue注入到全局goroutinu队列中
 func injectglist(glist *gList) {
 	if glist.empty() {
 		return
@@ -3588,7 +3589,7 @@ func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintpt
 	// 将当前的newg插入到当前的p中的下一个调度位
 	runqput(_p_, newg, true)
 
-	// 如果有其它空闲的 P，并且没有 M 处于自旋等待，以及当前 g 不是 main goroutine 那么唤醒或新建某个m来执行任务
+	// 如果有其它空闲的 P，并且没有 M 处于自旋等待，以及runtime.main已经运行 那么唤醒或新建某个m来执行任务
 	if atomic.Load(&sched.npidle) != 0 && atomic.Load(&sched.nmspinning) == 0 && mainStarted {
 		wakep()
 	}
@@ -4633,6 +4634,7 @@ func sysmon() {
 				// observes that there is no work to do and no other running M's
 				// and reports deadlock.
 				incidlelocked(-1)
+				// 将就绪的网络链接的goroutinue重新加入到调度队列
 				injectglist(&list)
 				incidlelocked(1)
 			}

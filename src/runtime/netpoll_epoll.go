@@ -58,6 +58,7 @@ func netpollarm(pd *pollDesc, mode int) {
 
 // polls for ready network connections
 // returns list of goroutines that become runnable
+// 轮训就绪的网络链接，并返回他们的goroutines
 func netpoll(block bool) gList {
 	if epfd == -1 {
 		return gList{}

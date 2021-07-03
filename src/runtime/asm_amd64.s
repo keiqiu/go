@@ -222,7 +222,7 @@ ok:
 	MOVQ	$runtime·mainPC(SB), AX		// entry
 	PUSHQ	AX
 	PUSHQ	$0			// arg size
-	CALL	runtime·newproc(SB) // 参见proc.go@newproc 调用newproc函数，并且把runtime.main传递给他  创建一个新的goroutine，该 goroutine 绑定 runtime.main，放在 P 的本地队列，等待调度
+	CALL	runtime·newproc(SB) // 参见proc.go@u 调用newproc函数，并且把runtime.main传递给他  创建一个新的goroutine，该 goroutine 绑定 runtime.main，放在 P 的本地队列，等待调度
 	POPQ	AX
 	POPQ	AX
 
