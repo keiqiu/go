@@ -1340,6 +1340,7 @@ HaveSpan:
 		// sysUsed all the pages that are actually available
 		// in the span. Note that we don't need to decrement
 		// heap_released since we already did so earlier.
+		// 先操作系统申请使用，将使得这片内存区域从prepared变为ready状态
 		sysUsed(unsafe.Pointer(s.base()), s.npages<<_PageShift)
 		s.scavenged = false
 	}

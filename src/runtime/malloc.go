@@ -526,7 +526,9 @@ func mallocinit() {
 		// On darwin/arm64, the address space is even smaller.
 		// On AIX, mmaps starts at 0x0A00000000000000 for 64-bit.
 		// processes.
-		// 当前版本的AMD64架构就规定了只用48位地址；一个表示虚拟内存地址的64位指针只有低48位有效并带符号扩展到64位——换句话说，其高16位必须是全1或全0，而且必须与低48位的最高位（第47位）一致，否则通过该地址访问内存会产生#GP异常（general-protection exception）
+		// 当前版本的AMD64架构就规定了只用48位地址；一个表示虚拟内存地址的64位指针只有低48位有效并带符号扩展到64位——换句话说，
+		// 其高16位必须是全1或全0，而且必须与低48位的最高位（第47位）一致.
+		// 否则通过该地址访问内存会产生#GP异常（general-protection exception）
 		// 因此此处的循环从0X7f开始，这样高16位为0， 低48位的高位也为0，真的处处都是学问呀
 		// 将00C000000000 ~ 7FC000000000作为保留地址挂到mheap_.arenaHints上
 		for i := 0x7f; i >= 0; i-- {
@@ -1226,7 +1228,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	return x
 }
 
-// 大对象的分配，size是大小，needzero是否清零  noscan是gc相关的，暂时不知道
+// 大对象的分配，size是大小，needzero是否清零  noscan是gc相关的，含义是是否包含指针
 func largeAlloc(size uintptr, needzero bool, noscan bool) *mspan {
 	// print("largeAlloc size=", size, "\n")
 
