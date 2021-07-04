@@ -252,6 +252,7 @@ func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 // Nosplit because the arguments on the stack won't be scanned
 // until the defer record is spliced into the gp._defer list.
 //go:nosplit
+// defer,将defer的函数挂到当前的g上面，是一个链表，先进后出
 func deferprocStack(d *_defer) {
 	gp := getg()
 	if gp.m.curg != gp {
