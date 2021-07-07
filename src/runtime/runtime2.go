@@ -477,7 +477,7 @@ type g struct {
 	// scan work. We track this in bytes to make it fast to update
 	// and check for debt in the malloc hot path. The assist ratio
 	// determines how this corresponds to scan work debt.
-	// gc相关的逻辑，该值有正负之分，没看懂，估计涉及了gc的知识
+	// gc相关的逻辑，该值有正负之分，每当g申请了一次内存时，就会产生回收债务，当前g再次申请时，就需要协助gc偿还债务，避免gc中，其他协程不停的创建对象，导致一直无法完成gc
 	gcAssistBytes int64
 }
 

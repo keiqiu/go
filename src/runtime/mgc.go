@@ -414,6 +414,7 @@ type gcControllerState struct {
 	// this will be 0.05 to make up the missing 5%.
 	//
 	// If this is zero, no fractional workers are needed.
+	// gc任务需要占25%的任务量，如果gc分配无法准确，如只有5个p的时候，1个p完全工作分担20%，另外4个p就要就需要分配1.25%的占用时间协助gc
 	fractionalUtilizationGoal float64
 
 	_ cpu.CacheLinePad
@@ -727,6 +728,7 @@ func (c *gcControllerState) findRunnableGCWorker(_p_ *p) *g {
 		//
 		// This should be kept in sync with pollFractionalWorkerExit.
 		delta := nanotime() - gcController.markStartTime
+		// 当前p参数gc的时间已经超过了要分配的时间，则这个轮训不参与gc，否则标记为fraction状态，协助gc
 		if delta > 0 && float64(_p_.gcFractionalMarkTime)/float64(delta) > c.fractionalUtilizationGoal {
 			// Nope. No need to run a fractional worker.
 			return nil
