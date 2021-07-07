@@ -148,6 +148,7 @@ func growslice(et *_type, old slice, cap int) slice {
 		}
 		lenmem = uintptr(old.len) << shift
 		newlenmem = uintptr(cap) << shift
+
 		capmem = roundupsize(uintptr(newcap) << shift)
 		overflow = uintptr(newcap) > (maxAlloc >> shift)
 		newcap = int(capmem >> shift)

@@ -1394,6 +1394,7 @@ TEXT runtime·addmoduledata(SB),NOSPLIT,$0-0
 // - AX is the value being written at DI
 // It clobbers FLAGS. It does not clobber any general-purpose registers,
 // but may clobber others (e.g., SSE registers).
+// 写屏障
 TEXT runtime·gcWriteBarrier(SB),NOSPLIT,$120
 	// Save the registers clobbered by the fast path. This is slightly
 	// faster than having the caller spill these.

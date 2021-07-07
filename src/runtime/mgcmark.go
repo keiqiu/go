@@ -156,7 +156,7 @@ func markroot(gcw *gcWork, i uint32) {
 	// Note: if you add a case here, please also update heapdump.go:dumproots.
 	switch {
 	case baseFlushCache <= i && i < baseData:
-		// 释放mcache中的span 每个P的本地mcache
+		//  释放mcache中的span每个P的本地mcache
 		flushmcache(int(i - baseFlushCache))
 
 	case baseData <= i && i < baseBSS:
