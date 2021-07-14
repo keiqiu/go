@@ -18,7 +18,7 @@ TEXT runtime∕internal∕atomic·Cas(SB),NOSPLIT,$0-17
 	MOVQ	ptr+0(FP), BX
 	MOVL	old+8(FP), AX
 	MOVL	new+12(FP), CX
-	LOCK
+	LOCK                    // 锁住总线，防止其他cpu通过总线访问内存
 	CMPXCHGL	CX, 0(BX)
 	SETEQ	ret+16(FP)
 	RET
