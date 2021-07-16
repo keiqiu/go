@@ -157,7 +157,7 @@ type bmap struct {
 	// tophash generally contains the top byte of the hash value
 	// for each key in this bucket. If tophash[0] < minTopHash,
 	// tophash[0] is a bucket evacuation state instead.
-	tophash [bucketCnt]uint8
+	tophash [bucketCnt]uint8 // 这里使用了一个长度8的数组，总共是64字节，充分利用cacheline， 在key hash到一个bucket中，将key的高8位按空位依次填充进去。由于在cpu的缓存中，其遍历速度相当快
 	// Followed by bucketCnt keys and then bucketCnt elems.
 	// NOTE: packing all the keys together and then all the elems together makes the
 	// code a bit more complicated than alternating key/elem/key/elem/... but it allows
