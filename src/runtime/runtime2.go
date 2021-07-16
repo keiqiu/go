@@ -184,19 +184,22 @@ type note struct {
 	key uintptr
 }
 
+// 方法函数， 是个动态结构
 type funcval struct {
 	fn uintptr
 	// variable-size, fn-specific data here
 }
 
+// 非空方法
 type iface struct {
 	tab  *itab
 	data unsafe.Pointer
 }
 
+// 空接口 var i interface{}
 type eface struct {
-	_type *_type
-	data  unsafe.Pointer
+	_type *_type         // 指向的类型
+	data  unsafe.Pointer // 指向的数据
 }
 
 func efaceOf(ep *interface{}) *eface {

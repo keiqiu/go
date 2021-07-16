@@ -25,12 +25,13 @@ const (
 // Needs to be in sync with ../cmd/link/internal/ld/decodesym.go:/^func.commonsize,
 // ../cmd/compile/internal/gc/reflect.go:/^func.dcommontype and
 // ../reflect/type.go:/^type.rtype.
+// 类型描述 所有的类型都是这个
 type _type struct {
-	size       uintptr
-	ptrdata    uintptr // size of memory prefix holding all pointers
-	hash       uint32
+	size       uintptr // 大小
+	ptrdata    uintptr // size of memory prefix holding all pointers 该值如果为0 则表示该类型没有指针元素，否则记录的应该是指针变量的大小
+	hash       uint32  // 初始化的一个hash
 	tflag      tflag
-	align      uint8
+	align      uint8 // 对齐字节数
 	fieldalign uint8
 	kind       uint8
 	alg        *typeAlg
