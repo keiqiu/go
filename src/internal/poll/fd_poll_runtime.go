@@ -29,11 +29,12 @@ func runtime_pollUnblock(ctx uintptr)
 func runtime_isPollServerDescriptor(fd uintptr) bool
 
 type pollDesc struct {
-	runtimeCtx uintptr
+	runtimeCtx uintptr // 是一个runtime.pollDesc的结构，pollOpen函数返回
 }
 
 var serverInit sync.Once
 
+// 初始化pd
 func (pd *pollDesc) init(fd *FD) error {
 	serverInit.Do(runtime_pollServerInit)
 	ctx, errno := runtime_pollOpen(uintptr(fd.Sysfd))

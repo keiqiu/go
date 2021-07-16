@@ -16,18 +16,20 @@ import (
 )
 
 // Network file descriptor.
+// 网络文件描述符
 type netFD struct {
-	pfd poll.FD
+	pfd poll.FD // internal/poll/FD
 
 	// immutable until Close
-	family      int
-	sotype      int
+	family      int  // ipv4 ipv6
+	sotype      int  // 协议簇 SOCK_STREAM (TCP)、SOCK_DGRAM (UDP) 工作在传输层，SOCK_RAW
 	isConnected bool // handshake completed or use of association with peer
 	net         string
 	laddr       Addr
 	raddr       Addr
 }
 
+// 创建一个网络的文件描述符
 func newFD(sysfd, family, sotype int, net string) (*netFD, error) {
 	ret := &netFD{
 		pfd: poll.FD{
