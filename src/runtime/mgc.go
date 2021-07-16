@@ -2300,6 +2300,7 @@ func clearpools() {
 	// Leave per-P caches alone, they have strictly bounded size.
 	// Disconnect cached list before dropping it on the floor,
 	// so that a dangling ref to one entry does not pin all of them.
+	// 清理sudog的cache
 	lock(&sched.sudoglock)
 	var sg, sgnext *sudog
 	for sg = sched.sudogcache; sg != nil; sg = sgnext {
@@ -2311,6 +2312,7 @@ func clearpools() {
 
 	// Clear central defer pools.
 	// Leave per-P pools alone, they have strictly bounded size.
+	// 清理defer的池子
 	lock(&sched.deferlock)
 	for i := range sched.deferpool {
 		// disconnect cached list before dropping it on the floor,
