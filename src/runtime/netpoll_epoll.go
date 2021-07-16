@@ -40,6 +40,7 @@ func netpolldescriptor() uintptr {
 	return uintptr(epfd)
 }
 
+// 注册一个fd到epoll中
 func netpollopen(fd uintptr, pd *pollDesc) int32 {
 	var ev epollevent
 	ev.events = _EPOLLIN | _EPOLLOUT | _EPOLLRDHUP | _EPOLLET
@@ -96,6 +97,7 @@ retry:
 			if ev.events == _EPOLLERR {
 				pd.everr = true
 			}
+			// 有准备就绪的链接
 			netpollready(&toRun, pd, mode)
 		}
 	}

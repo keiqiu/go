@@ -32,10 +32,11 @@ import (
 //             and unparks the goroutine.
 // nil - nothing of the above.
 const (
-	pdReady uintptr = 1
-	pdWait  uintptr = 2
+	pdReady uintptr = 1 // 就绪通知的信号量，g消费的时候会将其置为nil
+	pdWait  uintptr = 2 // g准备将一个信号放置，但是还没有做
 )
 
+// 一个poll块的大小，一次创建就创建一个pollblock
 const pollBlockSize = 4 * 1024
 
 // Network poller descriptor.
@@ -59,15 +60,16 @@ type pollDesc struct {
 	everr   bool    // marks event scanning error happened
 	user    uint32  // user settable cookie
 	rseq    uintptr // protects from stale read timers
-	rg      uintptr // pdReady, pdWait, G waiting for read or nil
+	rg      uintptr // pdReady, pdWait, G waiting for read or nil  如果不为nil，则指向一个pdready或者pdwait或者发生阻塞的g  是在netpollblock进行赋值的
 	rt      timer   // read deadline timer (set if rt.f != nil)
 	rd      int64   // read deadline
 	wseq    uintptr // protects from stale write timers
-	wg      uintptr // pdReady, pdWait, G waiting for write or nil
+	wg      uintptr // pdReady, pdWait, G waiting for write or nil 如果不为nil，则指向一个pdready或者pdwait或者发生阻塞的g 是在netpollblock进行赋值的
 	wt      timer   // write deadline timer
 	wd      int64   // write deadline
 }
 
+// 维护一个pollDesc的结构池子,很好奇这个池子在gc的时候为什么不清理，不会一直膨胀么？
 type pollCache struct {
 	lock  mutex
 	first *pollDesc
@@ -131,6 +133,7 @@ func poll_runtime_pollOpen(fd uintptr) (*pollDesc, int) {
 	unlock(&pd.lock)
 
 	var errno int32
+	// 不同平台不同的实现，linux使用epoll
 	errno = netpollopen(fd, pd)
 	return pd, int(errno)
 }
@@ -150,6 +153,7 @@ func poll_runtime_pollClose(pd *pollDesc) {
 	pollcache.free(pd)
 }
 
+// 归还pollDesc
 func (c *pollCache) free(pd *pollDesc) {
 	lock(&c.lock)
 	pd.link = c.first
@@ -181,6 +185,7 @@ func poll_runtime_pollWait(pd *pollDesc, mode int) int {
 	if GOOS == "solaris" || GOOS == "illumos" || GOOS == "aix" {
 		netpollarm(pd, mode)
 	}
+	// 是否需要等待
 	for !netpollblock(pd, int32(mode), false) {
 		err = netpollcheckerr(pd, int32(mode))
 		if err != 0 {
@@ -319,8 +324,10 @@ func poll_runtime_pollUnblock(pd *pollDesc) {
 // make pd ready, newly runnable goroutines (if any) are added to toRun.
 // May run during STW, so write barriers are not allowed.
 //go:nowritebarrier
+// 将网络准备就绪的g加到toRun中
 func netpollready(toRun *gList, pd *pollDesc, mode int32) {
 	var rg, wg *g
+	// 唤醒g
 	if mode == 'r' || mode == 'r'+'w' {
 		rg = netpollunblock(pd, 'r', true)
 	}
@@ -351,6 +358,7 @@ func netpollcheckerr(pd *pollDesc, mode int32) int {
 	return 0
 }
 
+// netpool gopark协程的回调，将g挂到pollDesc的wg或者rg上
 func netpollblockcommit(gp *g, gpp unsafe.Pointer) bool {
 	r := atomic.Casuintptr((*uintptr)(gpp), pdWait, uintptr(unsafe.Pointer(gp)))
 	if r {
@@ -369,6 +377,7 @@ func netpollgoready(gp *g, traceskip int) {
 
 // returns true if IO is ready, or false if timedout or closed
 // waitio - wait only for completed IO, ignore errors
+// 如果io已经准备好了，就返回true，否则进入wait，并且尝试阻塞协程
 func netpollblock(pd *pollDesc, mode int32, waitio bool) bool {
 	gpp := &pd.rg
 	if mode == 'w' {
@@ -394,6 +403,7 @@ func netpollblock(pd *pollDesc, mode int32, waitio bool) bool {
 	// this is necessary because runtime_pollUnblock/runtime_pollSetDeadline/deadlineimpl
 	// do the opposite: store to closing/rd/wd, membarrier, load of rg/wg
 	if waitio || netpollcheckerr(pd, mode) == 0 {
+		// 暂停协程，并将g的值赋值给gpp，最终赋值了pollDesc结构的rg或wg
 		gopark(netpollblockcommit, unsafe.Pointer(gpp), waitReasonIOWait, traceEvGoBlockNet, 5)
 	}
 	// be careful to not lose concurrent READY notification
@@ -404,6 +414,7 @@ func netpollblock(pd *pollDesc, mode int32, waitio bool) bool {
 	return old == pdReady
 }
 
+// 从读或者写时间恢复，返回当前网络执行的g
 func netpollunblock(pd *pollDesc, mode int32, ioready bool) *g {
 	gpp := &pd.rg
 	if mode == 'w' {
@@ -485,8 +496,10 @@ func netpollWriteDeadline(arg interface{}, seq uintptr) {
 	netpolldeadlineimpl(arg.(*pollDesc), seq, false, true)
 }
 
+// 分配一个pollDesc
 func (c *pollCache) alloc() *pollDesc {
 	lock(&c.lock)
+	// 如果first为nil，初始化
 	if c.first == nil {
 		const pdSize = unsafe.Sizeof(pollDesc{})
 		n := pollBlockSize / pdSize
@@ -495,6 +508,7 @@ func (c *pollCache) alloc() *pollDesc {
 		}
 		// Must be in non-GC memory because can be referenced
 		// only from epoll/kqueue internals.
+		// 一次申请多个，然后组成一个链表
 		mem := persistentalloc(n*pdSize, 0, &memstats.other_sys)
 		for i := uintptr(0); i < n; i++ {
 			pd := (*pollDesc)(add(mem, i*pdSize))
@@ -502,6 +516,7 @@ func (c *pollCache) alloc() *pollDesc {
 			c.first = pd
 		}
 	}
+	// 返回第一个
 	pd := c.first
 	c.first = pd.link
 	unlock(&c.lock)
